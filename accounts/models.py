@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 
 class UserType(models.TextChoices):
     STUDENT = "student", "Student"
@@ -14,7 +15,7 @@ class User(AbstractUser):
 
     email = models.EmailField(
     unique=True,
-    blank=False,
+    blank=False, 
     null=False
     )
 
@@ -137,6 +138,8 @@ class Program(models.Model):
 
     class Meta:
         ordering = ["name"]
+        verbose_name = "Program"
+        verbose_name_plural = "Programs"
 
     def __str__(self):
         return f"{self.code} - {self.name}"
@@ -199,6 +202,10 @@ class AcademicSession(models.Model):
 
     def __str__(self):
         return self.title
+
+    def clean(self):
+        if self.end_date <= self.start_date:
+          raise ValidationError("End date must be after start date.")
 
 
 ##office Model
@@ -295,6 +302,12 @@ class Batch(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.program.code})"
+
+    def clean(self):
+        if self.graduation_year <= self.admission_year:
+            raise ValidationError(
+               "Graduation year must be greater than admission year."
+        )
 
 
 ##StudentProfile Model
@@ -404,6 +417,12 @@ class StudentProfile(models.Model):
     def __str__(self):
         return f"{self.registration_number} - {self.user.get_full_name() or self.user.username}"
 
+    def clean(self):
+        if self.cgpa < 0 or self.cgpa > 4:
+            raise ValidationError(
+              "CGPA must be between 0.00 and 4.00."
+        )
+
 
 
 ##FacultyProfile Model
@@ -454,7 +473,8 @@ class FacultyProfile(models.Model):
     )
 
     max_fyp_groups = models.PositiveIntegerField(
-        default=5
+        default=5,
+        validators=[MinValueValidator(1)]
     )
 
     created_at = models.DateTimeField(
@@ -607,6 +627,8 @@ class ResponsibilityAssignment(models.Model):
         verbose_name_plural = "Responsibility Assignments"
 
     def clean(self):
+        super().clean()
+
         # At least one person must be assigned
         if not self.faculty and not self.staff:
             raise ValidationError(
@@ -624,6 +646,12 @@ class ResponsibilityAssignment(models.Model):
             raise ValidationError(
                 "End date cannot be earlier than start date."
             )
+
+    def save(self,*args,**kwargs):
+        self.full_clean()
+        super().save(*args,**kwargs)
+        
+        
 
     def __str__(self):
         person = self.faculty if self.faculty else self.staff
