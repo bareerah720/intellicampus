@@ -32,5 +32,5 @@ urlpatterns = [
         TokenRefreshView.as_view(), 
         name="token_refresh"
         ),
-    
+
 ]

@@ -423,6 +423,35 @@ class StudentProfile(models.Model):
               "CGPA must be between 0.00 and 4.00."
         )
 
+    def save(self, *args, **kwargs):
+        if not self.registration_number:
+            session_type = self.academic_session.session_type.upper()
+            year = str(self.academic_session.start_date.year)[-2:]
+            program_code = self.program.code.upper()
+
+            prefix = f"{session_type[:2]}{year}-{program_code}"
+
+            last_student = (
+                StudentProfile.objects
+                .filter(registration_number__startswith=prefix + "-")
+                .order_by("-registration_number")
+                .first()
+            )
+
+            if last_student:
+                last_number = int(
+                    last_student.registration_number.split("-")[-1]
+                )
+                next_number = last_number + 1
+            else:
+                next_number = 1
+
+            self.registration_number = (
+                f"{prefix}-{next_number:03d}"
+            )
+
+        super().save(*args, **kwargs)
+
 
 
 ##FacultyProfile Model
