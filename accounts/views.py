@@ -1,15 +1,15 @@
-from django.shortcuts import render
-from .permissions import IsAdmin
-from .permissions import IsAdmin, IsStudent, IsAdminOrStudent
-from .permissions import IsAdmin, IsAdminOrStudent, IsOwnerOrAdmin
+from rest_framework import generics
+from rest_framework.permissions import IsAuthenticated
+
 from .permissions import (
     IsAdmin,
     IsAdminOrStudent,
     IsAdminOrFaculty,
+    IsAdminOrStaff,
+    IsFaculty,
+    IsStaff,
     IsOwnerOrAdmin,
 )
-from rest_framework import generics
-from rest_framework.permissions import IsAuthenticated
 
 from .models import (
     User,
@@ -137,25 +137,26 @@ class FacultyProfileDetailView(generics.RetrieveUpdateDestroyAPIView):
 class StaffProfileListCreateView(generics.ListCreateAPIView):
     queryset = StaffProfile.objects.all()
     serializer_class = StaffProfileSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrStaff]
+
 
 class StaffProfileDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = StaffProfile.objects.all()
     serializer_class = StaffProfileSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrStaff, IsOwnerOrAdmin]
 
 
 class ResponsibilityAssignmentListCreateView(generics.ListCreateAPIView):
     queryset = ResponsibilityAssignment.objects.all()
     serializer_class = ResponsibilityAssignmentSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrFaculty]
 
 class ResponsibilityAssignmentDetailView(
     generics.RetrieveUpdateDestroyAPIView
 ):
     queryset = ResponsibilityAssignment.objects.all()
     serializer_class = ResponsibilityAssignmentSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrFaculty]
 
 class CurrentUserView(generics.RetrieveAPIView):
     serializer_class = UserSerializer
