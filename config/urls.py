@@ -10,6 +10,8 @@ urlpatterns = [
 
     path("api/accounts/", include("accounts.urls")),
 
+    path("api/applications/", include("applications.urls")),
+
     path(
         "api/auth/token/",
         TokenObtainPairView.as_view(),
