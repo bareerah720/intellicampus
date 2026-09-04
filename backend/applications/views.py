@@ -160,8 +160,9 @@ class ApplicationActionView(APIView):
         with transaction.atomic():
             try:
                 application = (
-                    Application.objects.select_for_update()
-                    .select_related("workflow", "current_step__office")
+                    Application.objects
+                    .select_for_update()
+                    .select_related("workflow")
                     .get(pk=pk)
                 )
             except Application.DoesNotExist:
