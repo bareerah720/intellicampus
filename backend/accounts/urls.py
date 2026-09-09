@@ -23,6 +23,7 @@ from .views import (
     FacultyProfileListCreateView,
     StaffProfileListCreateView,
     ResponsibilityAssignmentListCreateView,
+    StudentLoginView,
 )
 
 urlpatterns = [
@@ -152,5 +153,12 @@ urlpatterns = [
     "me/",
     CurrentUserView.as_view(),
     name="current-user",
+),
+
+
+    path(
+    "student-login/",
+    StudentLoginView.as_view(),
+    name="student-login",
 ),
 ]

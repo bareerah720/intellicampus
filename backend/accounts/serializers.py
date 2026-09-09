@@ -477,3 +477,56 @@ class ResponsibilityAssignmentSerializer(
             "created_at",
             "updated_at",
         ]
+
+# =========================================================
+# STUDENT LOGIN SERIALIZER
+# =========================================================
+
+class StudentLoginSerializer(serializers.Serializer):
+
+    registration_number = serializers.CharField(
+        required=True
+    )
+
+    password = serializers.CharField(
+        required=True,
+        write_only=True
+    )
+
+    def validate(self, attrs):
+
+        registration_number = attrs.get("registration_number")
+        password = attrs.get("password")
+
+        try:
+            student_profile = StudentProfile.objects.select_related(
+                "user"
+            ).get(
+                registration_number=registration_number
+            )
+        except StudentProfile.DoesNotExist:
+            raise serializers.ValidationError(
+                "Invalid registration number or password."
+            )
+
+        user = student_profile.user
+
+        if not user.is_active:
+            raise serializers.ValidationError(
+                "This account is inactive."
+            )
+
+        if not user.check_password(password):
+            raise serializers.ValidationError(
+                "Invalid registration number or password."
+            )
+
+        if user.user_type != "student":
+            raise serializers.ValidationError(
+                "This account is not a student account."
+            )
+
+        attrs["user"] = user
+        attrs["student_profile"] = student_profile
+
+        return attrs

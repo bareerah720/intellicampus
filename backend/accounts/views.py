@@ -1,5 +1,7 @@
-from rest_framework import generics
-from rest_framework.permissions import IsAuthenticated
+from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.response import Response
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from .permissions import (
     IsAdmin,
@@ -10,6 +12,7 @@ from .permissions import (
     IsStaff,
     IsOwnerOrAdmin,
 )
+
 
 from .models import (
     User,
@@ -37,8 +40,8 @@ from .serializers import (
     FacultyProfileSerializer,
     StaffProfileSerializer,
     ResponsibilityAssignmentSerializer,
+    StudentLoginSerializer,
 )
-
 
 class UserListCreateView(generics.ListCreateAPIView):
     queryset = User.objects.all()
@@ -164,3 +167,51 @@ class CurrentUserView(generics.RetrieveAPIView):
 
     def get_object(self):
         return self.request.user
+
+# =========================================================
+# STUDENT LOGIN VIEW
+# =========================================================
+
+class StudentLoginView(generics.GenericAPIView):
+
+    serializer_class = StudentLoginSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = serializer.validated_data["user"]
+        student_profile = serializer.validated_data["student_profile"]
+
+        # Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
+
+        return Response(
+            {
+                "message": "Student login successful.",
+                "refresh": str(refresh),
+                "access": str(refresh.access_token),
+
+                "user": {
+                    "id": user.id,
+                    "username": user.username,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "email": user.email,
+                    "user_type": user.user_type,
+                },
+
+                "student": {
+                    "id": student_profile.id,
+                    "registration_number": student_profile.registration_number,
+                    "program": student_profile.program_id,
+                    "batch": student_profile.batch_id,
+                    "current_semester": student_profile.current_semester_id,
+                    "cgpa": str(student_profile.cgpa),
+                    "profile_completed": student_profile.profile_completed,
+                },
+            },
+            status=status.HTTP_200_OK
+        )
