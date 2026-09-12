@@ -21,11 +21,18 @@ from .models import (
 
 class UserSerializer(serializers.ModelSerializer):
 
+    password = serializers.CharField(
+        write_only=True,
+        required=True,
+        min_length=8
+    )
+
     class Meta:
         model = User
         fields = [
             "id",
             "username",
+            "password",
             "first_name",
             "last_name",
             "email",
@@ -38,6 +45,7 @@ class UserSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
         read_only_fields = [
             "id",
             "date_joined",
@@ -45,6 +53,27 @@ class UserSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+    def create(self, validated_data):
+        password = validated_data.pop("password")
+
+        user = User(**validated_data)
+        user.set_password(password)
+        user.save()
+
+        return user
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop("password", None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        if password:
+            instance.set_password(password)
+
+        instance.save()
+
+        return instance
 
 # =========================================================
 # DEPARTMENT SERIALIZER
@@ -448,3 +477,56 @@ class ResponsibilityAssignmentSerializer(
             "created_at",
             "updated_at",
         ]
+
+# =========================================================
+# STUDENT LOGIN SERIALIZER
+# =========================================================
+
+class StudentLoginSerializer(serializers.Serializer):
+
+    registration_number = serializers.CharField(
+        required=True
+    )
+
+    password = serializers.CharField(
+        required=True,
+        write_only=True
+    )
+
+    def validate(self, attrs):
+
+        registration_number = attrs.get("registration_number")
+        password = attrs.get("password")
+
+        try:
+            student_profile = StudentProfile.objects.select_related(
+                "user"
+            ).get(
+                registration_number=registration_number
+            )
+        except StudentProfile.DoesNotExist:
+            raise serializers.ValidationError(
+                "Invalid registration number or password."
+            )
+
+        user = student_profile.user
+
+        if not user.is_active:
+            raise serializers.ValidationError(
+                "This account is inactive."
+            )
+
+        if not user.check_password(password):
+            raise serializers.ValidationError(
+                "Invalid registration number or password."
+            )
+
+        if user.user_type != "student":
+            raise serializers.ValidationError(
+                "This account is not a student account."
+            )
+
+        attrs["user"] = user
+        attrs["student_profile"] = student_profile
+
+        return attrs
