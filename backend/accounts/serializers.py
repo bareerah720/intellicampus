@@ -1,5 +1,13 @@
 from rest_framework import serializers
 
+from django.contrib.auth.password_validation import (
+    validate_password,
+)
+
+from django.core.exceptions import (
+    ValidationError as DjangoValidationError,
+)
+
 from .models import (
     User,
     Department,
@@ -51,6 +59,7 @@ class UserSerializer(serializers.ModelSerializer):
             "date_joined",
             "created_at",
             "updated_at",
+            "must_change_password",
         ]
 
     def create(self, validated_data):
@@ -526,7 +535,73 @@ class StudentLoginSerializer(serializers.Serializer):
                 "This account is not a student account."
             )
 
+        if not student_profile.is_active:
+            raise serializers.ValidationError(
+                "This student profile is inactive."
+            )
+
         attrs["user"] = user
         attrs["student_profile"] = student_profile
+
+        return attrs
+    
+class ChangePasswordSerializer(
+    serializers.Serializer
+):
+
+    current_password = serializers.CharField(
+        required=True,
+        write_only=True,
+    )
+
+    new_password = serializers.CharField(
+        required=True,
+        write_only=True,
+    )
+
+    def validate_current_password(self, value):
+
+        user = self.context["request"].user
+
+        if not user.check_password(value):
+
+            raise serializers.ValidationError(
+                "Current password is incorrect."
+            )
+
+        return value
+
+    def validate_new_password(self, value):
+
+        user = self.context["request"].user
+
+        try:
+
+            validate_password(
+                value,
+                user=user
+            )
+
+        except DjangoValidationError as error:
+
+            raise serializers.ValidationError(
+                error.messages
+            )
+
+        return value
+
+    def validate(self, attrs):
+
+        if (
+            attrs["current_password"]
+            == attrs["new_password"]
+        ):
+
+            raise serializers.ValidationError(
+                {
+                    "new_password":
+                    "New password must be different."
+                }
+            )
 
         return attrs

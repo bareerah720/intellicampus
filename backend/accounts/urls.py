@@ -24,6 +24,7 @@ from .views import (
     StaffProfileListCreateView,
     ResponsibilityAssignmentListCreateView,
     StudentLoginView,
+    ChangePasswordView,
 )
 
 urlpatterns = [
@@ -63,7 +64,7 @@ urlpatterns = [
         "semesters/<int:pk>/",
         SemesterDetailView.as_view(),
         name="semester-detail",
-   ),
+    ),
 
     path(
         "academic-sessions/",
@@ -72,9 +73,9 @@ urlpatterns = [
     ),
 
     path(
-       "academic-sessions/<int:pk>/",
-       AcademicSessionDetailView.as_view(),
-       name="academic-session-detail",
+        "academic-sessions/<int:pk>/",
+        AcademicSessionDetailView.as_view(),
+        name="academic-session-detail",
     ),
 
     path(
@@ -84,9 +85,9 @@ urlpatterns = [
     ),
 
     path(
-       "offices/<int:pk>/",
-       OfficeDetailView.as_view(),
-       name="office-detail",
+        "offices/<int:pk>/",
+        OfficeDetailView.as_view(),
+        name="office-detail",
     ),
 
     path(
@@ -96,9 +97,9 @@ urlpatterns = [
     ),
 
     path(
-       "batches/<int:pk>/",
-       BatchDetailView.as_view(),
-       name="batch-detail",
+        "batches/<int:pk>/",
+        BatchDetailView.as_view(),
+        name="batch-detail",
     ),
 
     path(
@@ -161,4 +162,11 @@ urlpatterns = [
     StudentLoginView.as_view(),
     name="student-login",
 ),
+
+    path(
+    "change-password/",
+    ChangePasswordView.as_view(),
+    name="change-password",
+),
+
 ]

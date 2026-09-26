@@ -1,4 +1,7 @@
-from rest_framework.permissions import BasePermission
+from rest_framework.permissions import (
+    BasePermission,
+    SAFE_METHODS,
+)
 
 
 # =========================================================
@@ -86,3 +89,27 @@ class IsOwnerOrAdmin(BasePermission):
             return True
 
         return obj.user == request.user
+
+    from rest_framework.permissions import (
+    BasePermission,
+    SAFE_METHODS,
+)
+
+
+class IsAdminOrReadOnly(BasePermission):
+
+    message = (
+        "Only admin can create, update, or delete records."
+    )
+
+    def has_permission(self, request, view):
+
+        if not request.user.is_authenticated:
+            return False
+
+        # GET, HEAD, OPTIONS
+        if request.method in SAFE_METHODS:
+            return True
+
+        # POST, PUT, PATCH, DELETE
+        return request.user.user_type == "admin"

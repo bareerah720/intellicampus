@@ -1,38 +1,44 @@
 from django.contrib import admin
 from django.urls import path, include
+
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
 )
 
+
 urlpatterns = [
-    path("admin/", admin.site.urls),
 
-    path("api/accounts/", include("accounts.urls")),
+    # Django Admin
+    path(
+        "admin/",
+        admin.site.urls
+    ),
 
-    path("api/applications/", include("applications.urls")),
+    # Module 1: Accounts
+    path(
+        "api/accounts/",
+        include("accounts.urls")
+    ),
 
+    # Module 2: Applications
+    path(
+        "api/applications/",
+        include("applications.urls")
+    ),
+
+    # JWT Login
     path(
         "api/auth/token/",
         TokenObtainPairView.as_view(),
         name="token_obtain_pair",
     ),
 
+    # JWT Refresh
     path(
         "api/auth/token/refresh/",
         TokenRefreshView.as_view(),
         name="token_refresh",
     ),
-
-    path(
-        "api/token/", 
-        TokenObtainPairView.as_view(), 
-        name="token_obtain_pair"
-        ),
-    path(
-        "api/token/refresh/", 
-        TokenRefreshView.as_view(), 
-        name="token_refresh"
-        ),
 
 ]
