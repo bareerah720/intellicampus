@@ -23,6 +23,7 @@ from .views import (
     AttachmentListCreateView,
     AttachmentDetailView,
 
+    OfficerInboxView,
     CommentListCreateView,
     CommentDetailView,
 
@@ -189,5 +190,15 @@ urlpatterns = [
         "approval-logs/<int:pk>/",
         ApprovalLogDetailView.as_view(),
         name="approval-log-detail",
+    ),
+
+    # =====================================================
+    # OFFICER INBOX
+    # =====================================================
+
+    path(
+        "inbox/",
+        OfficerInboxView.as_view(),
+        name="officer-inbox",
     ),
 ]

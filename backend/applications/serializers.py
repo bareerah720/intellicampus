@@ -1,9 +1,7 @@
-from urllib import request
-
 from rest_framework import serializers
+from django.utils import timezone
 
 from accounts.models import StudentProfile
-from django.utils import timezone
 
 from .models import (
     ApplicationType,
@@ -12,14 +10,11 @@ from .models import (
     Workflow,
     WorkflowStep,
     ApplicationStatus,
-    StudentProfile, 
     Application,
     Attachment,
     Comment,
     ApprovalLog,
 )
-from accounts.models import StudentProfile
-
 # =========================================================
 # APPLICATION TYPE SERIALIZER
 # =========================================================
@@ -286,19 +281,27 @@ class ApplicationSerializer(serializers.ModelSerializer):
             })
 
         # Find active workflow for selected application type
-        try:
-            workflow = Workflow.objects.get(
-                application_type=application_type,
-                is_active=True
+        # Find active workflows for selected application type
+        
+        workflows = list(
+            Workflow.objects.filter(
+            application_type=application_type,
+            is_active=True
+            )[:2]
             )
-        except Workflow.DoesNotExist:
+        if not workflows:
             raise serializers.ValidationError({
-                "application_type": (
-                    "No active workflow exists for this "
-                    "application type."
-                )
+                "application_type":  "No active workflow exists for this application type."
             })
 
+        if len(workflows) > 1:
+            raise serializers.ValidationError({
+                "application_type":
+                "Multiple active workflows exist. "
+                "Admin must keep only one active workflow."
+    })
+        
+        workflow = workflows[0]
         # Find first step of workflow
         current_step = workflow.steps.order_by(
             "step_order"
@@ -311,7 +314,7 @@ class ApplicationSerializer(serializers.ModelSerializer):
                     "no workflow steps."
                 )
             })
-         # Store automatically selected objects
+        # Store automatically selected objects
         attrs["workflow"] = workflow
         attrs["current_step"] = current_step
         

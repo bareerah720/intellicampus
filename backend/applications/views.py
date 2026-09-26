@@ -5,6 +5,8 @@ from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from accounts.permissions import IsAdminOrReadOnly
+from rest_framework.exceptions import PermissionDenied
 
 from .models import (
     ApplicationType,
@@ -36,73 +38,117 @@ from accounts.models import ResponsibilityAssignment
 class ApplicationTypeListCreateView(generics.ListCreateAPIView):
     queryset = ApplicationType.objects.all()
     serializer_class = ApplicationTypeSerializer
-    permission_classes = [IsAuthenticated]
-
+    permission_classes = [IsAdminOrReadOnly]
 
 class ApplicationTypeDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = ApplicationType.objects.all()
     serializer_class = ApplicationTypeSerializer
-    permission_classes = [IsAuthenticated]
-
+    permission_classes = [IsAdminOrReadOnly]
 
 class ApplicationFieldListCreateView(generics.ListCreateAPIView):
     queryset = ApplicationField.objects.all()
     serializer_class = ApplicationFieldSerializer
-    permission_classes = [IsAuthenticated]
-
+    permission_classes = [IsAdminOrReadOnly]
 
 class ApplicationFieldDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = ApplicationField.objects.all()
     serializer_class = ApplicationFieldSerializer
-    permission_classes = [IsAuthenticated]
-
+    permission_classes = [IsAdminOrReadOnly]
 
 class ApplicationFieldOptionListCreateView(generics.ListCreateAPIView):
     queryset = ApplicationFieldOption.objects.all()
     serializer_class = ApplicationFieldOptionSerializer
-    permission_classes = [IsAuthenticated]
-
+    permission_classes = [IsAdminOrReadOnly]
 
 class ApplicationFieldOptionDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = ApplicationFieldOption.objects.all()
     serializer_class = ApplicationFieldOptionSerializer
-    permission_classes = [IsAuthenticated]
-
+    permission_classes = [IsAdminOrReadOnly]
 
 class WorkflowListCreateView(generics.ListCreateAPIView):
     queryset = Workflow.objects.all()
     serializer_class = WorkflowSerializer
-    permission_classes = [IsAuthenticated]
-
+    permission_classes = [IsAdminOrReadOnly]
 
 class WorkflowDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Workflow.objects.all()
     serializer_class = WorkflowSerializer
-    permission_classes = [IsAuthenticated]
-
+    permission_classes = [IsAdminOrReadOnly]
 
 class WorkflowStepListCreateView(generics.ListCreateAPIView):
     queryset = WorkflowStep.objects.all()
     serializer_class = WorkflowStepSerializer
-    permission_classes = [IsAuthenticated]
-
+    permission_classes = [IsAdminOrReadOnly]
 
 class WorkflowStepDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = WorkflowStep.objects.all()
     serializer_class = WorkflowStepSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrReadOnly]
 
+class ApplicationListCreateView(
+    generics.ListCreateAPIView
+):
 
-class ApplicationListCreateView(generics.ListCreateAPIView):
-    queryset = Application.objects.all()
     serializer_class = ApplicationSerializer
+
     permission_classes = [IsAuthenticated]
 
-
-class ApplicationDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Application.objects.all()
+
+    def get_queryset(self):
+
+        user = self.request.user
+
+        # Admin can see all applications
+        if user.user_type == "admin":
+
+            return Application.objects.all()
+
+        # Student can see own applications
+        if user.user_type == "student":
+
+            return Application.objects.filter(
+                student__user=user
+            )
+
+        # Faculty/staff visibility will be handled
+        # through their scoped responsibility assignments.
+        return Application.objects.none()
+
+    def perform_create(self, serializer):
+
+        if self.request.user.user_type != "student":
+
+            raise PermissionDenied(
+                "Only students can submit applications."
+            )
+
+        serializer.save()
+
+
+class ApplicationDetailView(
+    generics.RetrieveAPIView
+):
+
     serializer_class = ApplicationSerializer
+
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+
+        user = self.request.user
+
+        if user.user_type == "admin":
+
+            return Application.objects.all()
+
+        if user.user_type == "student":
+
+            return Application.objects.filter(
+                student__user=user
+            )
+
+        return Application.objects.none()
 
 
 class AttachmentListCreateView(generics.ListCreateAPIView):
@@ -140,6 +186,109 @@ class ApprovalLogDetailView(generics.RetrieveAPIView):
     serializer_class = ApprovalLogSerializer
     permission_classes = [IsAuthenticated]
 
+# =========================================================
+# OFFICER APPLICATION ACCESS
+# =========================================================
+
+def get_officer_applications(user):
+
+    # Only faculty and staff can use officer inbox
+    if user.user_type not in ["faculty", "staff"]:
+        return Application.objects.none()
+
+    today = timezone.localdate()
+
+    # Find active responsibility assignments
+    assignments = (
+        ResponsibilityAssignment.objects
+        .filter(
+            is_active=True,
+            start_date__lte=today,
+            office__isnull=False,
+        )
+        .filter(
+            Q(end_date__isnull=True) |
+            Q(end_date__gte=today)
+        )
+        .filter(
+            Q(faculty__user=user) |
+            Q(staff__user=user)
+        )
+    )
+
+    # Start with an empty filter
+    application_filter = Q(pk__in=[])
+
+    for assignment in assignments:
+
+        # Application must currently be at assigned office
+        condition = Q(
+            current_step__office_id=assignment.office_id
+        )
+
+        # Match department if assignment is department-specific
+        if assignment.department_id:
+
+            condition &= Q(
+                student__program__department_id=(
+                    assignment.department_id
+                )
+            )
+
+        # Match batch if assignment is batch-specific
+        if assignment.batch_id:
+
+            condition &= Q(
+                student__batch_id=assignment.batch_id
+            )
+
+        application_filter |= condition
+
+    # Return applications awaiting officer action
+    return (
+        Application.objects
+        .filter(
+            application_filter,
+            status__in=[
+                ApplicationStatus.SUBMITTED,
+                ApplicationStatus.IN_PROGRESS,
+            ],
+        )
+        .select_related(
+            "student",
+            "student__user",
+            "application_type",
+            "current_step",
+            "workflow",
+        )
+        .distinct()
+    )
+
+
+# =========================================================
+# OFFICER INBOX VIEW
+# =========================================================
+
+class OfficerInboxView(generics.ListAPIView):
+
+    serializer_class = ApplicationSerializer
+
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+
+        user = self.request.user
+
+        if user.user_type == "admin":
+
+            return Application.objects.filter(
+                status__in=[
+                    ApplicationStatus.SUBMITTED,
+                    ApplicationStatus.IN_PROGRESS,
+                ]
+            )
+
+        return get_officer_applications(user)
 
 class ApplicationActionView(APIView):
     permission_classes = [IsAuthenticated]
@@ -301,9 +450,14 @@ class ApplicationActionView(APIView):
             # 8. Check whether current user is authorized
             # ------------------------------------------------
             user = request.user
-
-            # Admin can perform workflow actions
             authorized = user.user_type == "admin"
+            
+            if not authorized:
+                authorized = (
+                get_officer_applications(user)
+                .filter(pk=application.pk)
+                .exists()
+                )
 
             if not authorized:
 
@@ -562,3 +716,13 @@ class ApplicationActionView(APIView):
                 },
                 status=status.HTTP_200_OK,
             )
+
+
+        if application.status == ApplicationStatus.DRAFT:
+            return Response(
+        {
+            "detail":
+                "Draft application must be submitted before approval."
+        },
+        status=status.HTTP_400_BAD_REQUEST,
+    )
