@@ -6,6 +6,7 @@ from accounts.models import (
     User,
     StudentProfile,
     Office,
+    ResponsibilityAssignment,
 )
 
 
@@ -221,6 +222,13 @@ class WorkflowStep(models.Model):
 
     step_order = models.PositiveIntegerField(
         validators=[MinValueValidator(1)]
+    )
+
+    required_responsibility = models.CharField(
+    max_length=50,
+    choices=ResponsibilityAssignment.ResponsibilityType.choices,
+    null=True,
+    blank=True,
     )
 
     can_approve = models.BooleanField(
@@ -476,11 +484,19 @@ class Comment(models.Model):
 # =========================================================
 
 class ActionType(models.TextChoices):
-    APPROVED = "approved", "Approved"
-    REJECTED = "rejected", "Rejected"
-    FORWARDED = "forwarded", "Forwarded"
-    REVISION_REQUIRED = "revision_required", "Revision Required"
 
+    APPROVED = "approved", "Approved"
+
+    REJECTED = "rejected", "Rejected"
+
+    FORWARDED = "forwarded", "Forwarded"
+
+    REVISION_REQUIRED = (
+        "revision_required",
+        "Revision Required"
+    )
+
+    RESUBMITTED = "resubmitted", "Resubmitted"
 
 class ApprovalLog(models.Model):
 

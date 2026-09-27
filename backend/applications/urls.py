@@ -4,6 +4,7 @@ from .views import (
     ApplicationTypeListCreateView,
     ApplicationTypeDetailView,
     ApplicationActionView,
+    ApplicationResubmitView,
 
     ApplicationFieldListCreateView,
     ApplicationFieldDetailView,
@@ -201,4 +202,13 @@ urlpatterns = [
         OfficerInboxView.as_view(),
         name="officer-inbox",
     ),
+    # =====================================================
+    # Re Submission
+    # =====================================================
+
+    path(
+    "<int:pk>/resubmit/",
+    ApplicationResubmitView.as_view(),
+    name="application-resubmit",
+),
 ]

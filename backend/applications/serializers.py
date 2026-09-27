@@ -132,17 +132,20 @@ class WorkflowStepSerializer(serializers.ModelSerializer):
         model = WorkflowStep
 
         fields = [
-            "id",
-            "workflow",
-            "workflow_name",
-            "office",
-            "office_name",
-            "step_name",
-            "step_order",
-            "can_approve",
-            "can_reject",
-            "can_request_revision",
-        ]
+    "id",
+    "workflow",
+    "workflow_name",
+    "office",
+    "office_name",
+    "step_name",
+    "step_order",
+
+    "required_responsibility",
+
+    "can_approve",
+    "can_reject",
+    "can_request_revision",
+]
 
         read_only_fields = [
             "id",
@@ -468,3 +471,47 @@ class ApprovalLogSerializer(serializers.ModelSerializer):
             "action_by",
             "action_date",
         ]
+
+
+# =========================================================
+# APPLICATION RESUBMISSION SERIALIZER
+# =========================================================
+
+class ApplicationResubmitSerializer(
+    serializers.Serializer
+):
+
+    title = serializers.CharField(
+        required=False,
+        max_length=200,
+        allow_blank=False
+    )
+
+    description = serializers.CharField(
+        required=False,
+        allow_blank=False
+    )
+
+    form_data = serializers.JSONField(
+        required=False
+    )
+
+    def validate_form_data(self, value):
+
+        if not isinstance(value, dict):
+
+            raise serializers.ValidationError(
+                "Form data must be a JSON object."
+            )
+
+        return value
+
+    def validate(self, attrs):
+
+        if not attrs:
+
+            raise serializers.ValidationError(
+                "Provide at least one field to correct."
+            )
+
+        return attrs
