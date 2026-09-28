@@ -2,6 +2,7 @@
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+from django.shortcuts import get_object_or_404
 
 from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied
@@ -255,29 +256,52 @@ class ApplicationDetailView(
 ):
 
     serializer_class = ApplicationSerializer
-
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
 
         user = self.request.user
 
-        # Admin can see all applications
+        # Admin can view every application
         if user.user_type == "admin":
-
             return Application.objects.all()
 
-        # Student can see own applications
+        # Student can view only own applications
         if user.user_type == "student":
-
             return Application.objects.filter(
                 student__user=user
             )
 
-        # Faculty/staff can open applications
+        # Faculty / staff can view applications
         # currently assigned to them
+        if user.user_type in ["faculty", "staff"]:
+            return get_officer_applications(user)
+
+        return Application.objects.none()
+
+
+# =========================================================
+# GENERAL APPLICATION ACCESS
+# =========================================================
+
+def get_accessible_applications(user):
+
+    # Admin can access every application
+    if user.user_type == "admin":
+        return Application.objects.all()
+
+    # Student can access only own applications
+    if user.user_type == "student":
+        return Application.objects.filter(
+            student__user=user
+        )
+
+    # Faculty / staff can access applications
+    # currently assigned to them
+    if user.user_type in ["faculty", "staff"]:
         return get_officer_applications(user)
 
+    return Application.objects.none()
 
 # =========================================================
 # ATTACHMENTS
@@ -287,23 +311,133 @@ class AttachmentListCreateView(
     generics.ListCreateAPIView
 ):
 
-    queryset = Attachment.objects.all()
-
     serializer_class = AttachmentSerializer
-
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+
+        accessible_applications = (
+            get_accessible_applications(
+                self.request.user
+            )
+        )
+
+        queryset = (
+            Attachment.objects
+            .filter(
+                application__in=accessible_applications
+            )
+            .select_related(
+                "application",
+                "uploaded_by",
+            )
+        )
+
+        # Optional:
+        # /attachments/?application=4
+        application_id = (
+            self.request.query_params.get(
+                "application"
+            )
+        )
+
+        if application_id:
+            queryset = queryset.filter(
+                application_id=application_id
+            )
+
+        return queryset
+
+    def perform_create(self, serializer):
+
+        application_id = (
+            self.request.data.get("application")
+        )
+
+        if not application_id:
+
+            raise PermissionDenied(
+                "Application is required."
+            )
+
+        accessible_application = (
+            get_accessible_applications(
+                self.request.user
+            )
+            .filter(pk=application_id)
+            .first()
+        )
+
+        if not accessible_application:
+
+            raise PermissionDenied(
+                "You do not have access to this application."
+            )
+
+        # Finalized applications should not be modified
+        if accessible_application.status in [
+            ApplicationStatus.APPROVED,
+            ApplicationStatus.REJECTED,
+            ApplicationStatus.CANCELLED,
+        ]:
+
+            raise PermissionDenied(
+                "Attachments cannot be added "
+                "to a finalized application."
+            )
+
+        serializer.save(
+            uploaded_by=self.request.user
+        )
 
 class AttachmentDetailView(
-    generics.RetrieveUpdateDestroyAPIView
+    generics.RetrieveDestroyAPIView
 ):
 
-    queryset = Attachment.objects.all()
-
     serializer_class = AttachmentSerializer
-
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+
+        accessible_applications = (
+            get_accessible_applications(
+                self.request.user
+            )
+        )
+
+        return Attachment.objects.filter(
+            application__in=accessible_applications
+        )
+
+    def perform_destroy(self, instance):
+
+        user = self.request.user
+
+        # Admin can delete
+        if user.user_type == "admin":
+            instance.delete()
+            return
+
+        # Only original uploader can delete
+        if instance.uploaded_by_id != user.id:
+
+            raise PermissionDenied(
+                "You cannot delete another user's attachment."
+            )
+
+        # Do not change finalized application records
+        if instance.application.status in [
+            ApplicationStatus.APPROVED,
+            ApplicationStatus.REJECTED,
+            ApplicationStatus.CANCELLED,
+        ]:
+
+            raise PermissionDenied(
+                "Attachments of a finalized application "
+                "cannot be deleted."
+            )
+
+        instance.delete()
 
 # =========================================================
 # COMMENTS
@@ -313,49 +447,153 @@ class CommentListCreateView(
     generics.ListCreateAPIView
 ):
 
-    queryset = Comment.objects.all()
-
     serializer_class = CommentSerializer
-
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+
+        accessible_applications = (
+            get_accessible_applications(
+                self.request.user
+            )
+        )
+
+        queryset = (
+            Comment.objects
+            .filter(
+                application__in=accessible_applications
+            )
+            .select_related(
+                "application",
+                "user",
+            )
+        )
+
+        application_id = (
+            self.request.query_params.get(
+                "application"
+            )
+        )
+
+        if application_id:
+
+            queryset = queryset.filter(
+                application_id=application_id
+            )
+
+        return queryset
+
+    def perform_create(self, serializer):
+
+        application_id = (
+            self.request.data.get("application")
+        )
+
+        if not application_id:
+
+            raise PermissionDenied(
+                "Application is required."
+            )
+
+        accessible_application = (
+            get_accessible_applications(
+                self.request.user
+            )
+            .filter(pk=application_id)
+            .first()
+        )
+
+        if not accessible_application:
+
+            raise PermissionDenied(
+                "You do not have access to this application."
+            )
+
+        serializer.save(
+            user=self.request.user
+        )
 
 class CommentDetailView(
-    generics.RetrieveUpdateDestroyAPIView
+    generics.RetrieveAPIView
 ):
 
-    queryset = Comment.objects.all()
-
     serializer_class = CommentSerializer
-
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+
+        accessible_applications = (
+            get_accessible_applications(
+                self.request.user
+            )
+        )
+
+        return Comment.objects.filter(
+            application__in=accessible_applications
+        )
 
 # =========================================================
 # APPROVAL LOGS
 # =========================================================
 
-class ApprovalLogListCreateView(
-    generics.ListAPIView
-):
-
-    queryset = ApprovalLog.objects.all()
+class ApprovalLogListCreateView(generics.ListAPIView):
 
     serializer_class = ApprovalLogSerializer
-
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
 
-class ApprovalLogDetailView(
-    generics.RetrieveAPIView
-):
+        accessible_applications = (
+            get_accessible_applications(
+                self.request.user
+            )
+        )
 
-    queryset = ApprovalLog.objects.all()
+        queryset = (
+            ApprovalLog.objects
+            .filter(
+                application__in=accessible_applications
+            )
+            .select_related(
+                "application",
+                "workflow_step",
+                "action_by",
+            )
+            .order_by("action_date")
+        )
+
+        # Optional filter:
+        # /approval-logs/?application=4
+        application_id = (
+            self.request.query_params.get(
+                "application"
+            )
+        )
+
+        if application_id:
+            queryset = queryset.filter(
+                application_id=application_id
+            )
+
+        return queryset
+
+
+class ApprovalLogDetailView(generics.RetrieveAPIView):
 
     serializer_class = ApprovalLogSerializer
-
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+
+        accessible_applications = (
+            get_accessible_applications(
+                self.request.user
+            )
+        )
+
+        return ApprovalLog.objects.filter(
+            application__in=accessible_applications
+        )
 
 # =========================================================
 # OFFICER INBOX VIEW
@@ -1066,3 +1304,428 @@ class ApplicationResubmitView(APIView):
                 },
                 status=status.HTTP_200_OK
             )
+
+
+# =========================================================
+# APPLICATION TRACKING
+# =========================================================
+
+class ApplicationTrackingView(APIView):
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+
+        user = request.user
+
+        # ---------------------------------------------
+        # 1. Application access
+        # ---------------------------------------------
+
+        if user.user_type == "admin":
+
+            application = get_object_or_404(
+                Application.objects.select_related(
+                    "student",
+                    "student__user",
+                    "student__program",
+                    "student__program__department",
+                    "student__batch",
+                    "application_type",
+                    "workflow",
+                    "current_step",
+                    "current_step__office",
+                ),
+                pk=pk,
+            )
+
+        elif user.user_type == "student":
+
+            application = get_object_or_404(
+                Application.objects.select_related(
+                    "student",
+                    "student__user",
+                    "student__program",
+                    "student__program__department",
+                    "student__batch",
+                    "application_type",
+                    "workflow",
+                    "current_step",
+                    "current_step__office",
+                ),
+                pk=pk,
+                student__user=user,
+            )
+
+        else:
+
+            return Response(
+                {
+                    "detail":
+                    "Only the student who owns the application "
+                    "or an admin can track it."
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # ---------------------------------------------
+        # 2. Decide where application currently is
+        # ---------------------------------------------
+
+        current_holder = None
+        current_officer = None
+
+        if application.status == ApplicationStatus.REVISION_REQUIRED:
+
+            current_holder = "student"
+
+        elif application.status in [
+            ApplicationStatus.APPROVED,
+            ApplicationStatus.REJECTED,
+            ApplicationStatus.CANCELLED,
+        ]:
+
+            current_holder = "completed"
+
+        elif application.current_step:
+
+            current_holder = "officer"
+
+            today = timezone.localdate()
+
+            assignments = (
+                ResponsibilityAssignment.objects
+                .filter(
+                    responsibility_type=(
+                        application.current_step.required_responsibility
+                    ),
+                    office=application.current_step.office,
+                    is_active=True,
+                    start_date__lte=today,
+                )
+                .filter(
+                    Q(end_date__isnull=True) |
+                    Q(end_date__gte=today)
+                )
+            )
+
+            # -----------------------------------------
+            # Advisor -> exact student batch
+            # -----------------------------------------
+
+            if (
+                application.current_step.required_responsibility
+                == "advisor"
+            ):
+
+                assignments = assignments.filter(
+                    batch=application.student.batch
+                )
+
+                if application.student.program.department_id:
+
+                    assignments = assignments.filter(
+                        Q(department__isnull=True) |
+                        Q(
+                            department=(
+                                application.student.program.department
+                            )
+                        )
+                    )
+
+            # -----------------------------------------
+            # HOD -> exact student department
+            # -----------------------------------------
+
+            elif (
+                application.current_step.required_responsibility
+                == "hod"
+            ):
+
+                assignments = assignments.filter(
+                    department=(
+                        application.student.program.department
+                    )
+                )
+
+            assignment = (
+                assignments
+                .select_related(
+                    "faculty",
+                    "faculty__user",
+                    "staff",
+                    "staff__user",
+                    "office",
+                )
+                .first()
+            )
+
+            # -----------------------------------------
+            # 3. Current officer information
+            # -----------------------------------------
+
+            if assignment:
+
+                person_profile = (
+                    assignment.faculty
+                    if assignment.faculty
+                    else assignment.staff
+                )
+
+                officer_user = person_profile.user
+
+                profile_picture = None
+
+                if officer_user.profile_picture:
+
+                    profile_picture = request.build_absolute_uri(
+                        officer_user.profile_picture.url
+                    )
+
+                current_officer = {
+                    "id": officer_user.id,
+
+                    "name": (
+                        officer_user.get_full_name()
+                        or officer_user.username
+                    ),
+
+                    "email": officer_user.email,
+
+                    "profile_picture": profile_picture,
+
+                    "designation": (
+                        person_profile.designation
+                    ),
+
+                    "responsibility": (
+                        assignment.get_responsibility_type_display()
+                    ),
+
+                    "responsibility_code": (
+                        assignment.responsibility_type
+                    ),
+
+                    "office": (
+                        assignment.office.name
+                        if assignment.office
+                        else None
+                    ),
+
+                    "office_location": (
+                        assignment.office.office_location
+                        if assignment.office
+                        else None
+                    ),
+
+                    "office_email": (
+                        assignment.office.email
+                        if assignment.office
+                        else None
+                    ),
+                }
+
+        # ---------------------------------------------
+        # 4. Approval / status history
+        # ---------------------------------------------
+
+        history = []
+        approval_stamps = []
+
+        approval_logs = (
+            application.approval_logs
+            .select_related(
+                "workflow_step",
+                "workflow_step__office",
+                "action_by",
+            )
+            .order_by("action_date")
+        )
+
+        for log in approval_logs:
+
+            action_user = log.action_by
+
+            designation = None
+            profile_picture = None
+
+            faculty_profile = getattr(
+                action_user,
+                "faculty_profile",
+                None
+            )
+
+            staff_profile = getattr(
+                action_user,
+                "staff_profile",
+                None
+            )
+
+            if faculty_profile:
+                designation = faculty_profile.designation
+
+            elif staff_profile:
+                designation = staff_profile.designation
+
+            elif action_user.user_type == "admin":
+                designation = "Administrator"
+
+            elif action_user.user_type == "student":
+                designation = "Student"
+
+            if action_user.profile_picture:
+
+                profile_picture = request.build_absolute_uri(
+                    action_user.profile_picture.url
+                )
+
+            history.append({
+                "id": log.id,
+
+                "step": log.workflow_step.step_name,
+
+                "responsibility": (
+                    log.workflow_step.required_responsibility
+                ),
+
+                "action": log.action,
+
+                "action_by": (
+                    action_user.get_full_name()
+                    or action_user.username
+                ),
+
+                "designation": designation,
+
+                "profile_picture": profile_picture,
+
+                "remarks": log.remarks,
+
+                "action_date": log.action_date,
+            })
+
+        # -----------------------------------------
+        # Electronic approval stamp
+        # -----------------------------------------
+
+            if log.action == ActionType.APPROVED:
+                responsibility = None
+            if log.workflow_step.required_responsibility:
+                responsibility = (
+                    log.workflow_step.get_required_responsibility_display()
+                )
+                office = log.workflow_step.office
+                approval_stamps.append({
+                    "approval_log_id": log.id,
+                    "step": log.workflow_step.step_name,
+                    "approved_by": (
+                        action_user.get_full_name()
+                        or action_user.username
+                        ),
+
+        "designation":
+            designation,
+
+        "responsibility":
+            responsibility,
+
+        "email":
+            action_user.email,
+
+        "profile_picture":
+            profile_picture,
+
+        "office": (
+            office.name
+            if office
+            else None
+        ),
+
+        "office_location": (
+            office.office_location
+            if office
+            else None
+        ),
+
+        "approved_at":
+            log.action_date,
+
+        "remarks":
+            log.remarks,
+
+        "verification_type":
+            "authenticated_account_action",
+
+        "verification_text":
+            "Electronically approved through IntelliCampus",
+    })
+
+        # ---------------------------------------------
+        # 5. Final response
+        # ---------------------------------------------
+
+        return Response(
+            {
+                "application": {
+                    "id": application.id,
+
+                    "tracking_number":
+                        application.tracking_number,
+
+                    "application_type":
+                        application.application_type.name,
+
+                    "title":
+                        application.title,
+
+                    "description":
+                        application.description,
+
+                    "status":
+                        application.status,
+
+                    "priority":
+                        application.priority,
+
+                    "current_step": (
+                        application.current_step.step_name
+                        if application.current_step
+                        else None
+                    ),
+
+                    "submitted_at":
+                        application.submitted_at,
+
+                    "completed_at":
+                        application.completed_at,
+                },
+
+                "student": {
+                    "name": (
+                        application.student.user.get_full_name()
+                        or application.student.user.username
+                    ),
+
+                    "registration_number":
+                        application.student.registration_number,
+
+                    "program":
+                        application.student.program.name,
+
+                    "batch":
+                        application.student.batch.name,
+                },
+
+                "current_holder":
+                    current_holder,
+
+                "current_officer":
+                    current_officer,
+
+                "history":
+                    history,
+
+                "approval_stamps": approval_stamps,
+            },
+            status=status.HTTP_200_OK,
+        )

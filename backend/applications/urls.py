@@ -8,6 +8,7 @@ from .views import (
 
     ApplicationFieldListCreateView,
     ApplicationFieldDetailView,
+    ApplicationTrackingView,
 
     ApplicationFieldOptionListCreateView,
     ApplicationFieldOptionDetailView,
@@ -210,5 +211,11 @@ urlpatterns = [
     "<int:pk>/resubmit/",
     ApplicationResubmitView.as_view(),
     name="application-resubmit",
+),
+
+    path(
+    "<int:pk>/tracking/",
+    ApplicationTrackingView.as_view(),
+    name="application-tracking",
 ),
 ]

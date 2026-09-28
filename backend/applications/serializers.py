@@ -306,17 +306,24 @@ class ApplicationSerializer(serializers.ModelSerializer):
         
         workflow = workflows[0]
         # Find first step of workflow
-        current_step = workflow.steps.order_by(
-            "step_order"
-        ).first()
-
+        current_step = (
+    workflow.steps
+    .filter(
+        required_responsibility__isnull=False
+    )
+    .exclude(
+        required_responsibility=""
+    )
+    .order_by("step_order")
+    .first()
+)
         if not current_step:
             raise serializers.ValidationError({
-                "application_type": (
-                    "The selected application type has "
-                    "no workflow steps."
-                )
-            })
+        "application_type": (
+            "The selected application type has "
+            "no approval workflow steps."
+        )
+    })
         # Store automatically selected objects
         attrs["workflow"] = workflow
         attrs["current_step"] = current_step
@@ -384,6 +391,7 @@ class AttachmentSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "application_tracking_number",
+            "uploaded_by",
             "uploaded_by_name",
             "uploaded_at",
         ]
@@ -421,6 +429,7 @@ class CommentSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "application_tracking_number",
+            "user",
             "user_name",
             "created_at",
         ]
