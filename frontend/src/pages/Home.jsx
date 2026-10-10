@@ -9,20 +9,12 @@ function Home() {
         <h2>University Student Portal</h2>
 
         <p>
-          A unified platform for students, teachers, HODs and administrators.
+          A unified platform for students, faculty, staff and administrators.
         </p>
 
         <div>
           <Link to="/login">
             <button type="button">Login</button>
-          </Link>
-        </div>
-
-        <br />
-
-        <div>
-          <Link to="/register">
-            <button type="button">Create Account</button>
           </Link>
         </div>
       </section>
