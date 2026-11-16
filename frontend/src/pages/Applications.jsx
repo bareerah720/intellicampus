@@ -1,103 +1,20 @@
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
 import { useAuth } from '../hooks/useAuth'
-
-// Demo application types
-const requestTypes = [
-  {
-    id: 1,
-    name: 'Leave Request',
-    icon: '📅',
-    description: 'Apply for academic or medical leave.',
-    fields: [
-      { id: 1, label: 'Start Date', field_name: 'start_date', field_type: 'date', is_required: true, display_order: 1 },
-      { id: 2, label: 'End Date', field_name: 'end_date', field_type: 'date', is_required: true, display_order: 2 },
-      { id: 3, label: 'Reason', field_name: 'reason', field_type: 'textarea', is_required: true, display_order: 3 },
-    ],
-  },
-  {
-    id: 2,
-    name: 'Fee Installment',
-    icon: '💳',
-    description: 'Request semester fee payment in installments.',
-    fields: [
-      { id: 4, label: 'Total Fee Due', field_name: 'total_fee', field_type: 'number', is_required: true, display_order: 1 },
-      {
-        id: 5,
-        label: 'Number of Installments',
-        field_name: 'installments',
-        field_type: 'dropdown',
-        is_required: true,
-        display_order: 2,
-        options: [
-          { label: '2 Installments', value: '2' },
-          { label: '3 Installments', value: '3' },
-          { label: '4 Installments', value: '4' },
-        ],
-      },
-      { id: 6, label: 'Reason', field_name: 'reason', field_type: 'textarea', is_required: true, display_order: 3 },
-    ],
-  },
-  {
-    id: 3,
-    name: 'Course Drop',
-    icon: '📚',
-    description: 'Request to drop a registered course.',
-    fields: [
-      { id: 7, label: 'Course Code', field_name: 'course_code', field_type: 'text', is_required: true, display_order: 1 },
-      { id: 8, label: 'Course Name', field_name: 'course_name', field_type: 'text', is_required: true, display_order: 2 },
-      { id: 9, label: 'Reason', field_name: 'reason', field_type: 'textarea', is_required: true, display_order: 3 },
-    ],
-  },
-  {
-    id: 4,
-    name: 'Course Registration',
-    icon: '📝',
-    description: 'Request course registration or enrollment.',
-    fields: [
-      { id: 10, label: 'Course Code', field_name: 'course_code', field_type: 'text', is_required: true, display_order: 1 },
-      { id: 11, label: 'Course Name', field_name: 'course_name', field_type: 'text', is_required: true, display_order: 2 },
-      {
-        id: 12,
-        label: 'Semester',
-        field_name: 'semester',
-        field_type: 'dropdown',
-        is_required: true,
-        display_order: 3,
-        options: Array.from({ length: 8 }, (_, i) => ({
-          label: `${i + 1}${['st', 'nd', 'rd'][i] || 'th'} Semester`,
-          value: String(i + 1),
-        })),
-      },
-    ],
-  },
-  {
-    id: 5,
-    name: 'Medical Emergency',
-    icon: '🏥',
-    description: 'Submit a medical emergency request.',
-    fields: [
-      { id: 13, label: 'Incident Date', field_name: 'incident_date', field_type: 'date', is_required: true, display_order: 1 },
-      { id: 14, label: 'Emergency Details', field_name: 'emergency_details', field_type: 'textarea', is_required: true, display_order: 2 },
-      { id: 15, label: 'Hospital / Doctor', field_name: 'hospital_doctor', field_type: 'text', is_required: false, display_order: 3 },
-    ],
-  },
-  {
-    id: 6,
-    name: 'Scholarship Request',
-    icon: '🎓',
-    description: 'Request financial or scholarship assistance.',
-    fields: [
-      { id: 17, label: 'Scholarship Name', field_name: 'scholarship_name', field_type: 'text', is_required: true, display_order: 1 },
-      { id: 18, label: 'Current GPA', field_name: 'current_gpa', field_type: 'number', is_required: true, display_order: 2 },
-      { id: 19, label: 'Reason', field_name: 'reason', field_type: 'textarea', is_required: true, display_order: 3 },
-    ],
-  },
-]
+import {
+  fetchApplicationSetup,
+  fetchMyApplications,
+  submitApplication,
+  fetchApplicationTracking,
+  resubmitApplication,
+} from '../services/applicationService'
 
 function getStatusClass(status) {
-  const normalized = (status || 'submitted').toLowerCase().replaceAll(' ', '_')
+  const normalized = (status || 'submitted')
+    .toLowerCase()
+    .replaceAll(' ', '_')
+
   return `status-chip ${normalized}`
 }
 
@@ -109,37 +26,147 @@ function formatStatus(status) {
 
 function Applications() {
   const { user } = useAuth()
+
   const role = user?.user_type || 'student'
   const currentUser = user?.username || user?.first_name || 'Student'
 
+  // Application setup states
+  const [requestTypes, setRequestTypes] = useState([])
+  const [loadingTypes, setLoadingTypes] = useState(true)
+  const [apiError, setApiError] = useState('')
+
+  // Application list states
+  const [applications, setApplications] = useState([])
+  const [loadingApplications, setLoadingApplications] = useState(true)
+
+  // Form and detail states
   const [selected, setSelected] = useState(null)
   const [selectedApplication, setSelectedApplication] = useState(null)
   const [formData, setFormData] = useState({})
   const [commentText, setCommentText] = useState('')
   const [attachmentFile, setAttachmentFile] = useState(null)
   const [notice, setNotice] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
-  const [applications, setApplications] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('ic_applications') || '[]')
-      return Array.isArray(saved) ? saved : []
-    } catch {
-      return []
+  // Revision and tracking states
+  const [editingApplication, setEditingApplication] = useState(null)
+  const [trackingHistory, setTrackingHistory] = useState([])
+  const [loadingTracking, setLoadingTracking] = useState(false)
+
+  // Load application types and dynamic fields
+  useEffect(() => {
+    async function loadApplicationSetup() {
+      try {
+        setLoadingTypes(true)
+        setApiError('')
+
+        const types = await fetchApplicationSetup()
+        setRequestTypes(types)
+      } catch (error) {
+        console.error('Application setup error:', error)
+
+        setApiError(
+          error.response?.data?.detail ||
+          'Unable to load application types. Please try again.'
+        )
+      } finally {
+        setLoadingTypes(false)
+      }
     }
-  })
 
+    loadApplicationSetup()
+  }, [])
+
+  // Load student's applications
+  useEffect(() => {
+    async function loadApplications() {
+      try {
+        setLoadingApplications(true)
+
+        const data = await fetchMyApplications()
+
+        const formattedApplications = data.map((app) => ({
+          id: app.id,
+          trackingNumber: app.tracking_number,
+          type: app.application_type_name,
+          applicationTypeId: app.application_type,
+          date: app.submitted_at
+            ? new Date(app.submitted_at).toLocaleDateString()
+            : '',
+          status: app.status,
+          currentStep: app.current_step_name || 'Not assigned yet',
+          data: app.form_data || {},
+          comments: [],
+          attachments: [],
+          approvalHistory: [],
+        }))
+
+        setApplications(formattedApplications)
+      } catch (error) {
+        console.error('My applications error:', error)
+        setNotice('Unable to load your applications.')
+      } finally {
+        setLoadingApplications(false)
+      }
+    }
+
+    loadApplications()
+  }, [])
+
+  // Load tracking history when application details are opened
+  useEffect(() => {
+    if (!selectedApplication?.id) {
+      setTrackingHistory([])
+      return
+    }
+
+    let isActive = true
+
+    async function loadTracking() {
+      try {
+        setLoadingTracking(true)
+
+        const tracking = await fetchApplicationTracking(
+          selectedApplication.id
+        )
+
+        if (isActive) {
+          setTrackingHistory(tracking.history || [])
+        }
+      } catch (error) {
+        console.error('Application tracking error:', error)
+
+        if (isActive) {
+          setTrackingHistory([])
+        }
+      } finally {
+        if (isActive) {
+          setLoadingTracking(false)
+        }
+      }
+    }
+
+    loadTracking()
+
+    return () => {
+      isActive = false
+    }
+  }, [selectedApplication?.id])
+
+  // Update application list and selected detail
   function saveApplications(updated) {
     setApplications(updated)
-    localStorage.setItem('ic_applications', JSON.stringify(updated))
 
     if (selectedApplication) {
       const refreshed = updated.find(
         (app) => app.id === selectedApplication.id
       )
+
       setSelectedApplication(refreshed || null)
     }
   }
 
+  // Update dynamic form fields
   function updateField(fieldName, value) {
     setFormData((previous) => ({
       ...previous,
@@ -147,51 +174,144 @@ function Applications() {
     }))
   }
 
-  function handleSubmit(e) {
+  // Submit new application or resubmit a revised application
+  async function handleSubmit(e) {
     e.preventDefault()
 
-    const trackingNumber = `DEMO-${Date.now().toString().slice(-6)}`
-    const submittedAt = new Date().toLocaleString()
+    if (!selected || submitting) return
 
-    const newApplication = {
-      id: trackingNumber,
-      trackingNumber,
-      type: selected.name,
-      applicationTypeId: selected.id,
-      date: new Date().toLocaleDateString(),
-      status: 'submitted',
-      currentStep: 'Application Submitted',
-      data: { ...formData },
-      comments: [],
-      attachments: [],
-      approvalHistory: [
-        {
-          action: 'submitted',
-          step: 'Student Submission',
-          remarks: 'Application submitted successfully.',
-          date: submittedAt,
-        },
-      ],
+    try {
+      setSubmitting(true)
+      setNotice('')
+
+      const applicationData = {
+        title: selected.name,
+        form_data: formData,
+      }
+
+      // Revision resubmission
+      if (editingApplication) {
+        const resubmissionData = { ...applicationData }
+
+        // The backend rejects a blank description, so only send it when non-empty.
+        if (selected.description?.trim()) {
+          resubmissionData.description = selected.description
+        }
+
+        await resubmitApplication(
+          editingApplication.id,
+          resubmissionData
+        )
+
+        const data = await fetchMyApplications()
+
+        const formattedApplications = data.map((app) => ({
+          id: app.id,
+          trackingNumber: app.tracking_number,
+          type: app.application_type_name,
+          applicationTypeId: app.application_type,
+          date: app.submitted_at
+            ? new Date(app.submitted_at).toLocaleDateString()
+            : '',
+          status: app.status,
+          currentStep: app.current_step_name || 'Not assigned yet',
+          data: app.form_data || {},
+          comments: [],
+          attachments: [],
+          approvalHistory: [],
+        }))
+
+        setApplications(formattedApplications)
+        setSelectedApplication(null)
+        setEditingApplication(null)
+        setSelected(null)
+        setFormData({})
+
+        setNotice(
+          `Application ${editingApplication.trackingNumber} resubmitted successfully!`
+        )
+
+      } else {
+        // New application submission
+        const savedApplication = await submitApplication({
+          application_type: selected.id,
+          title: selected.name,
+          description: selected.description || '',
+          form_data: formData,
+        })
+
+        const newApplication = {
+          id: savedApplication.id,
+          trackingNumber: savedApplication.tracking_number,
+          type: savedApplication.application_type_name,
+          applicationTypeId: savedApplication.application_type,
+          date: savedApplication.submitted_at
+            ? new Date(savedApplication.submitted_at).toLocaleDateString()
+            : new Date().toLocaleDateString(),
+          status: savedApplication.status,
+          currentStep: savedApplication.current_step_name || 'Not assigned yet',
+          data: savedApplication.form_data || {},
+          comments: [],
+          attachments: [],
+          approvalHistory: [],
+        }
+
+        setApplications((previous) => [
+          newApplication,
+          ...previous,
+        ])
+
+        setSelected(null)
+        setFormData({})
+
+        setNotice(
+          `Application submitted successfully! Tracking Number: ${savedApplication.tracking_number}`
+        )
+      }
+
+    } catch (error) {
+      console.error('Application submission error:', error)
+
+      const errorData = error.response?.data
+
+      setNotice(
+        typeof errorData === 'object'
+          ? JSON.stringify(errorData)
+          : 'Application submission failed. Please try again.'
+      )
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+    // Open an existing application for revision
+  function handleEditAndResubmit(application) {
+    const applicationType = requestTypes.find(
+      (type) => type.id === application.applicationTypeId
+    )
+
+    if (!applicationType) {
+      setNotice('Application type could not be found.')
+      return
     }
 
-    const updated = [newApplication, ...applications]
-
-    setApplications(updated)
-    localStorage.setItem('ic_applications', JSON.stringify(updated))
-
-    setSelected(null)
-    setFormData({})
-    setNotice('Your application has been submitted successfully!')
+    setEditingApplication(application)
+    setSelected(applicationType)
+    setFormData(application.data || {})
+    setSelectedApplication(null)
+    setNotice('')
   }
 
   function handleBack() {
     setSelected(null)
     setSelectedApplication(null)
+    setEditingApplication(null)
     setFormData({})
     setCommentText('')
     setAttachmentFile(null)
   }
 
+  // Demo comment functionality
   function addComment(e) {
     e.preventDefault()
 
@@ -215,9 +335,10 @@ function Applications() {
 
     saveApplications(updated)
     setCommentText('')
-    setNotice('Comment added successfully!')
+    setNotice('Comment added in this session.')
   }
 
+  // Demo attachment functionality
   function addAttachment(e) {
     e.preventDefault()
 
@@ -244,16 +365,17 @@ function Applications() {
     saveApplications(updated)
     setAttachmentFile(null)
     e.target.reset()
-    setNotice('Attachment added successfully!')
+    setNotice('Attachment added in this session.')
   }
 
+  // Render database-driven form fields
   function renderField(field) {
     const commonProps = {
       id: field.field_name,
       name: field.field_name,
       required: field.is_required,
       placeholder: field.placeholder || `Enter ${field.label}`,
-      value: formData[field.field_name] || '',
+      value: formData[field.field_name] ?? '',
       onChange: (e) => updateField(field.field_name, e.target.value),
     }
 
@@ -265,6 +387,7 @@ function Applications() {
         return (
           <select {...commonProps}>
             <option value="">Select an option</option>
+
             {(field.options || []).map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
@@ -284,7 +407,9 @@ function Applications() {
                   value={option.value}
                   required={field.is_required}
                   checked={formData[field.field_name] === option.value}
-                  onChange={(e) => updateField(field.field_name, e.target.value)}
+                  onChange={(e) =>
+                    updateField(field.field_name, e.target.value)
+                  }
                 />
                 {option.label}
               </label>
@@ -307,11 +432,14 @@ function Applications() {
                     onChange={(e) => {
                       const nextValues = e.target.checked
                         ? [...currentValues, option.value]
-                        : currentValues.filter((value) => value !== option.value)
+                        : currentValues.filter(
+                            (value) => value !== option.value
+                          )
 
                       updateField(field.field_name, nextValues)
                     }}
                   />
+
                   {option.label}
                 </label>
               )
@@ -367,12 +495,16 @@ function Applications() {
             <div className="application-list">
               <div className="application-list-item">
                 <strong>Tracking Number</strong>
-                <span>{selectedApplication.trackingNumber || selectedApplication.id}</span>
+                <span>
+                  {selectedApplication.trackingNumber || selectedApplication.id}
+                </span>
               </div>
 
               <div className="application-list-item">
                 <strong>Current Workflow Step</strong>
-                <span>{selectedApplication.currentStep || 'Not assigned yet'}</span>
+                <span>
+                  {selectedApplication.currentStep || 'Not assigned yet'}
+                </span>
               </div>
 
               <div className="application-list-item">
@@ -387,54 +519,98 @@ function Applications() {
                 </span>
               </div>
 
-              {Object.entries(selectedApplication.data || {}).map(([field, value]) => (
-                <div className="application-list-item" key={field}>
-                  <strong>{field.replaceAll('_', ' ')}</strong>
-                  <span>
-                    {Array.isArray(value) ? value.join(', ') : value || 'Not provided'}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {/* APPLICATION HISTORY */}
-            <div className="tracking-history">
-              <h3>Application History</h3>
-
-              {(selectedApplication.approvalHistory || []).length === 0 ? (
-                <p>No approval history available yet.</p>
-              ) : (
-                <div className="tracking-timeline">
-                  {selectedApplication.approvalHistory.map((item, index) => (
-                    <div className="tracking-timeline-item" key={index}>
-                      <div className="tracking-timeline-dot" />
-                      <div>
-                        <strong>{formatStatus(item.action)}</strong>
-                        <p>{item.step}</p>
-                        <p>{item.remarks}</p>
-                        <small>{item.date}</small>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              {Object.entries(selectedApplication.data || {}).map(
+                ([field, value]) => (
+                  <div className="application-list-item" key={field}>
+                    <strong>{field.replaceAll('_', ' ')}</strong>
+                    <span>
+                      {Array.isArray(value)
+                        ? value.join(', ')
+                        : value || 'Not provided'}
+                    </span>
+                  </div>
+                )
               )}
             </div>
 
-            {/* ATTACHMENTS */}
+            {selectedApplication.status === 'revision_required' && (
+  <div className="revision-required-panel">
+    <h3>Correction Required</h3>
+
+    <p>
+      Your application has been returned for correction.
+      Please review the officer's remarks below and update
+      the required information.
+    </p>
+
+    <button
+      type="button"
+      className="primary-button"
+      onClick={() => handleEditAndResubmit(selectedApplication)}
+    >
+      Edit & Resubmit
+    </button>
+  </div>
+)}
+
+            <div className="tracking-history">
+  <h3>Application History</h3>
+
+  {loadingTracking ? (
+    <p>Loading application history...</p>
+  ) : trackingHistory.length === 0 ? (
+    <p>No approval history available yet.</p>
+  ) : (
+    <div className="history-list">
+      {trackingHistory.map((item) => (
+        <div className="history-item" key={item.id}>
+          <strong>{formatStatus(item.action)}</strong>
+
+          <p>
+            <strong>Step:</strong> {item.step}
+          </p>
+
+          <p>
+            <strong>Officer:</strong> {item.action_by}
+            {item.designation ? ` (${item.designation})` : ''}
+          </p>
+
+          {item.remarks && (
+            <div className="revision-remarks">
+              <strong>Officer Remarks:</strong>
+              <p>{item.remarks}</p>
+            </div>
+          )}
+
+          <small>
+            {item.action_date
+              ? new Date(item.action_date).toLocaleString()
+              : ''}
+          </small>
+        </div>
+      ))}
+    </div>
+  )}
+</div>
+
             <div className="communication-section">
               <h3>Supporting Documents</h3>
               <p className="muted-note">
-                Attach documents related to this application.
+                Attachment details are currently temporary and are not uploaded
+                to the backend.
               </p>
 
               <form className="attachment-form" onSubmit={addAttachment}>
                 <input
                   type="file"
-                  onChange={(e) => setAttachmentFile(e.target.files?.[0] || null)}
+                  onChange={(e) =>
+                    setAttachmentFile(e.target.files?.[0] || null)
+                  }
                   required
                 />
+
                 <button type="submit" className="primary-button">
-                  Upload Attachment
+                  Add Attachment
                 </button>
               </form>
 
@@ -447,6 +623,7 @@ function Applications() {
                   {selectedApplication.attachments.map((file) => (
                     <div className="attachment-item" key={file.id}>
                       <span className="attachment-icon">📎</span>
+
                       <div>
                         <strong>{file.fileName}</strong>
                         <small>
@@ -459,7 +636,6 @@ function Applications() {
               )}
             </div>
 
-            {/* COMMENTS */}
             <div className="communication-section">
               <h3>Application Comments</h3>
               <p className="muted-note">
@@ -474,6 +650,7 @@ function Applications() {
                   onChange={(e) => setCommentText(e.target.value)}
                   required
                 />
+
                 <button
                   type="submit"
                   className="primary-button"
@@ -484,9 +661,7 @@ function Applications() {
               </form>
 
               {(selectedApplication.comments || []).length === 0 ? (
-                <p className="empty-communication">
-                  No comments yet.
-                </p>
+                <p className="empty-communication">No comments yet.</p>
               ) : (
                 <div className="comment-list">
                   {selectedApplication.comments.map((comment) => (
@@ -495,6 +670,7 @@ function Applications() {
                         <strong>{comment.user}</strong>
                         <small>{comment.createdAt}</small>
                       </div>
+
                       <p>{comment.comment}</p>
                     </div>
                   ))}
@@ -503,16 +679,19 @@ function Applications() {
             </div>
 
             <p className="muted-note">
-              Demo mode: comments and attachment details are stored in this browser.
-              Actual file storage will be connected to the backend later.
+              Comments and attachment details are temporary and will reset
+              when this page is refreshed.
             </p>
           </section>
         ) : selected ? (
           <section className="panel application-form-panel">
+
             <div className="panel-header">
               <div>
-                <div className="eyebrow">NEW REQUEST</div>
-                <h2>{selected.name}</h2>
+                <div className="eyebrow">
+  {editingApplication ? 'EDIT APPLICATION' : 'NEW REQUEST'}
+</div>
+                                <h2>{selected.name}</h2>
                 <p>{selected.description}</p>
               </div>
 
@@ -533,19 +712,28 @@ function Applications() {
                 ))}
 
               <div className="application-form-actions">
-                <button type="button" className="secondary-button" onClick={handleBack}>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={handleBack}
+                  disabled={submitting}
+                >
                   Cancel
                 </button>
-                <button type="submit" className="primary-button">
-                  Submit Application →
+
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={submitting}
+                >
+                  {submitting
+                    ? 'Submitting...'
+                    : editingApplication
+                      ? 'Resubmit Application →'
+                      : 'Submit Application →'}
                 </button>
               </div>
             </form>
-
-            <p className="muted-note">
-              Demo mode: your request is saved in this browser.
-              Backend submission will be connected later.
-            </p>
           </section>
         ) : (
           <>
@@ -554,44 +742,61 @@ function Applications() {
                 <h2>What would you like to apply for?</h2>
                 <p>Select an application type to get started.</p>
               </div>
+
               <span>{requestTypes.length} Services</span>
             </div>
 
-            <div className="application-type-grid">
-              {requestTypes.map((item) => (
-                <button
-                  className="application-type-card"
-                  key={item.id}
-                  onClick={() => {
-                    setSelected(item)
-                    setNotice('')
-                  }}
-                >
-                  <span className="application-type-icon">{item.icon}</span>
-                  <h3>{item.name}</h3>
-                  <p>{item.description}</p>
-                  <span className="application-card-link">
-                    Start application →
-                  </span>
-                </button>
-              ))}
-            </div>
+            {loadingTypes ? (
+              <p>Loading application types...</p>
+            ) : apiError ? (
+              <p className="application-notice">{apiError}</p>
+            ) : requestTypes.length === 0 ? (
+              <p>No active application types are available.</p>
+            ) : (
+              <div className="application-type-grid">
+                {requestTypes.map((item) => (
+                  <button
+                    className="application-type-card"
+                    key={item.id}
+                    onClick={() => {
+                      setSelected(item)
+                      setNotice('')
+                    }}
+                  >
+                    <span className="application-type-icon">
+                      📄
+                    </span>
+
+                    <h3>{item.name}</h3>
+                    <p>{item.description}</p>
+
+                    <span className="application-card-link">
+                      Start application →
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </>
         )}
 
         {!selectedApplication && !selected && (
           <section className="panel my-applications-panel">
+
             <div className="panel-header">
               <div>
                 <h2>My Applications</h2>
                 <p>Track the requests you have submitted.</p>
               </div>
+
               <span className="application-count">
                 {applications.length} Total
               </span>
             </div>
 
-            {applications.length === 0 ? (
+            {loadingApplications ? (
+              <p>Loading your applications...</p>
+            ) : applications.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-icon">▤</div>
                 <h3>No applications yet</h3>
@@ -603,6 +808,7 @@ function Applications() {
                   <div className="application-list-item" key={app.id}>
                     <div>
                       <strong>{app.type}</strong>
+
                       <small>
                         Tracking: {app.trackingNumber || app.id} · {app.date}
                       </small>
@@ -612,6 +818,7 @@ function Applications() {
                       <span className={getStatusClass(app.status)}>
                         {formatStatus(app.status)}
                       </span>
+
                       <button
                         className="secondary-button"
                         onClick={() => setSelectedApplication(app)}
@@ -623,10 +830,6 @@ function Applications() {
                 ))}
               </div>
             )}
-
-            <p className="muted-note">
-              Demo storage only. Live status updates require backend integration.
-            </p>
           </section>
         )}
 
