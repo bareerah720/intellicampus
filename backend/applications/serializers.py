@@ -16,6 +16,7 @@ from .models import (
     Comment,
     ApprovalLog,
 )
+from .models import get_application_priority
 
 
 def validate_dynamic_form_data(application_type, form_data):
@@ -333,6 +334,7 @@ class ApplicationSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "tracking_number",
+            "priority",
 
             # Automatically determined
             "student",
@@ -420,6 +422,7 @@ class ApplicationSerializer(serializers.ModelSerializer):
         # Store automatically selected objects.
         attrs["workflow"] = workflow
         attrs["current_step"] = current_step
+        attrs["priority"] = get_application_priority(application_type)
 
         return attrs
 

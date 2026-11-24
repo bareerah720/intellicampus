@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../hooks/useAuth'
 import {
   fetchNotifications,
   markNotificationRead,
@@ -13,6 +15,8 @@ function formatDate(value) {
 }
 
 function NotificationCenter() {
+  const navigate = useNavigate()
+  const { user } = useAuth()
   const [notifications, setNotifications] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -63,6 +67,32 @@ function NotificationCenter() {
     }
   }
 
+  function getApplicationListPath() {
+    if (user?.user_type === 'student') return '/applications'
+    if (['faculty', 'staff'].includes(user?.user_type)) return '/review-applications'
+    return null
+  }
+
+  async function handleNotificationClick(item) {
+    const applicationId = item.related_application ?? item.related_application_id
+    const isApplicationNotification = item.notification_type?.startsWith('application_')
+      || item.notification_type === 'revision_required'
+      || applicationId !== null && applicationId !== undefined && applicationId !== ''
+
+    if (!isApplicationNotification) return
+
+    if (!item.is_read) await handleMarkRead(item.id)
+
+    const destination = getApplicationListPath()
+    if (!destination) return
+
+    navigate(destination, {
+      state: applicationId === null || applicationId === undefined || applicationId === ''
+        ? undefined
+        : { applicationId },
+    })
+  }
+
   const unreadCount = notifications.filter(
     (item) => !item.is_read
   ).length
@@ -107,11 +137,32 @@ function NotificationCenter() {
                 className={`notification-dot ${item.is_read ? '' : 'blue'}`}
               />
 
-              <div>
-                <strong>{item.title}</strong>
-                <p>{item.message}</p>
-                <small>{formatDate(item.created_at)}</small>
-              </div>
+              {item.notification_type?.startsWith('application_')
+                || item.notification_type === 'revision_required'
+                || item.related_application !== null && item.related_application !== undefined ? (
+                  <button
+                    type="button"
+                    onClick={() => handleNotificationClick(item)}
+                    style={{
+                      flex: 1,
+                      padding: 0,
+                      border: 0,
+                      background: 'transparent',
+                      color: 'inherit',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <strong>{item.title}</strong>
+                    <p>{item.message}</p>
+                    <small>{formatDate(item.created_at)}</small>
+                  </button>
+                ) : (
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p>{item.message}</p>
+                    <small>{formatDate(item.created_at)}</small>
+                  </div>
+                )}
 
               {!item.is_read && (
                 <button

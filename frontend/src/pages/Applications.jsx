@@ -1,5 +1,6 @@
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import { useAuth } from '../hooks/useAuth'
 import {
@@ -47,8 +48,12 @@ function formatApplication(app) {
 
 function Applications() {
   const { user } = useAuth()
+  const location = useLocation()
 
   const role = user?.user_type || 'student'
+  const requestedApplicationId = location.state?.applicationId
+    ?? new URLSearchParams(location.search).get('applicationId')
+  const handledApplicationId = useRef(null)
 
   // Application setup states
   const [requestTypes, setRequestTypes] = useState([])
@@ -122,6 +127,21 @@ function Applications() {
 
     loadApplications()
   }, [])
+
+  useEffect(() => {
+    if (!requestedApplicationId || loadingApplications) return
+    if (String(handledApplicationId.current) === String(requestedApplicationId)) return
+
+    handledApplicationId.current = requestedApplicationId
+    const application = applications.find(
+      (item) => String(item.id) === String(requestedApplicationId)
+    )
+
+    if (application) {
+      setSelectedApplication(application)
+      setNotice('')
+    }
+  }, [applications, loadingApplications, requestedApplicationId])
 
   // Load tracking history when application details are opened
   useEffect(() => {

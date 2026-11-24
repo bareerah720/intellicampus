@@ -431,6 +431,16 @@ class AttachmentDetailView(
 
         user = self.request.user
 
+        if instance.application.status in [
+            ApplicationStatus.APPROVED,
+            ApplicationStatus.REJECTED,
+            ApplicationStatus.CANCELLED,
+        ]:
+            raise PermissionDenied(
+                "Attachments of a finalized application "
+                "cannot be deleted."
+            )
+
         # Admin can delete
         if user.user_type == "admin":
             instance.delete()
@@ -441,18 +451,6 @@ class AttachmentDetailView(
 
             raise PermissionDenied(
                 "You cannot delete another user's attachment."
-            )
-
-        # Do not change finalized application records
-        if instance.application.status in [
-            ApplicationStatus.APPROVED,
-            ApplicationStatus.REJECTED,
-            ApplicationStatus.CANCELLED,
-        ]:
-
-            raise PermissionDenied(
-                "Attachments of a finalized application "
-                "cannot be deleted."
             )
 
         instance.delete()
@@ -525,6 +523,15 @@ class CommentListCreateView(
 
             raise PermissionDenied(
                 "You do not have access to this application."
+            )
+
+        if accessible_application.status in [
+            ApplicationStatus.APPROVED,
+            ApplicationStatus.REJECTED,
+            ApplicationStatus.CANCELLED,
+        ]:
+            raise PermissionDenied(
+                "Comments cannot be added to a finalized application."
             )
 
         serializer.save(

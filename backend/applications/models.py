@@ -276,6 +276,27 @@ class ApplicationPriority(models.TextChoices):
     HIGH = "high", "High"
 
 
+TYPE_PRIORITY_RULES = {
+    "degree application": ApplicationPriority.HIGH,
+    "fee installment": ApplicationPriority.HIGH,
+    "scholarship": ApplicationPriority.HIGH,
+    "bonafide certificate": ApplicationPriority.MEDIUM,
+    "course drop": ApplicationPriority.MEDIUM,
+    "transcript": ApplicationPriority.MEDIUM,
+    "course registration": ApplicationPriority.LOW,
+}
+
+
+def get_application_priority(application_type):
+    name = getattr(application_type, "name", application_type)
+    if not isinstance(name, str):
+        name = str(name)
+    return TYPE_PRIORITY_RULES.get(
+        name.strip().casefold(),
+        ApplicationPriority.MEDIUM,
+    )
+
+
 class Application(models.Model):
 
     tracking_number = models.CharField(
@@ -368,6 +389,9 @@ class Application(models.Model):
 
         if not self.tracking_number:
             self.tracking_number = self.generate_tracking_number()
+
+        if self.application_type_id:
+            self.priority = get_application_priority(self.application_type)
 
         self.full_clean()
         super().save(*args, **kwargs)

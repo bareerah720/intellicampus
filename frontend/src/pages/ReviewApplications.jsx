@@ -1,5 +1,6 @@
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import { useAuth } from '../hooks/useAuth'
 import {
@@ -23,7 +24,11 @@ function getStatusClass(status) {
 
 function ReviewApplications() {
   const { user } = useAuth()
+  const location = useLocation()
   const role = user?.user_type || 'student'
+  const requestedApplicationId = location.state?.applicationId
+    ?? new URLSearchParams(location.search).get('applicationId')
+  const handledApplicationId = useRef(null)
 
   const [applications, setApplications] = useState([])
   const [selected, setSelected] = useState(null)
@@ -53,6 +58,21 @@ function ReviewApplications() {
   useEffect(() => {
     loadInbox()
   }, [])
+
+  useEffect(() => {
+    if (!requestedApplicationId || loading) return
+    if (String(handledApplicationId.current) === String(requestedApplicationId)) return
+
+    handledApplicationId.current = requestedApplicationId
+    const application = applications.find(
+      (item) => String(item.id) === String(requestedApplicationId)
+    )
+
+    if (application) {
+      setSelected(application)
+      setRemarks('')
+    }
+  }, [applications, loading, requestedApplicationId])
 
   useEffect(() => {
     if (!selected?.id) {
