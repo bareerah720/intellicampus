@@ -1,6 +1,7 @@
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
+from django.db.models.functions import TruncMonth
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 
@@ -10,8 +11,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import ResponsibilityAssignment
-from accounts.permissions import IsAdminOrReadOnly
+from accounts.models import ResponsibilityAssignment, StudentProfile, User
+from accounts.models import UserType
+from accounts.permissions import IsAdmin, IsAdminOrReadOnly
 
 from notifications.models import Notification
 from notifications.services import notify_student, notify_current_officers
@@ -619,6 +621,235 @@ class ApprovalLogDetailView(generics.RetrieveAPIView):
         return ApprovalLog.objects.filter(
             application__in=accessible_applications
         )
+
+class AdminAnalyticsView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        active_students = StudentProfile.objects.filter(
+            is_active=True,
+            user__is_active=True,
+        )
+
+        department_rows = (
+            active_students
+            .filter(program__department__isnull=False)
+            .values(
+                "program__department_id",
+                "program__department__name",
+            )
+            .annotate(count=Count("id"))
+            .order_by("program__department__name")
+        )
+        department_distribution = [
+            {
+                "department": row["program__department__name"],
+                "count": row["count"],
+            }
+            for row in department_rows
+        ]
+
+        missing_department_count = active_students.filter(
+            program__department__isnull=True
+        ).count()
+        if missing_department_count:
+            department_distribution.append({
+                "department": "Unassigned",
+                "count": missing_department_count,
+            })
+
+        semester_rows = (
+            active_students
+            .filter(current_semester__isnull=False)
+            .values(
+                "current_semester__number",
+                "current_semester__title",
+            )
+            .annotate(count=Count("id"))
+            .order_by("current_semester__number")
+        )
+        semester_distribution = [
+            {
+                "semester": row["current_semester__title"],
+                "number": row["current_semester__number"],
+                "count": row["count"],
+            }
+            for row in semester_rows
+        ]
+
+        missing_semester_count = active_students.filter(
+            current_semester__isnull=True
+        ).count()
+        if missing_semester_count:
+            semester_distribution.append({
+                "semester": "Unassigned",
+                "number": None,
+                "count": missing_semester_count,
+            })
+
+        status_breakdown = {
+            "submitted": Application.objects.filter(status=ApplicationStatus.SUBMITTED).count(),
+            "in_progress": Application.objects.filter(status=ApplicationStatus.IN_PROGRESS).count(),
+            "approved": Application.objects.filter(status=ApplicationStatus.APPROVED).count(),
+            "rejected": Application.objects.filter(status=ApplicationStatus.REJECTED).count(),
+            "revision_required": Application.objects.filter(status=ApplicationStatus.REVISION_REQUIRED).count(),
+        }
+
+        type_rows = (
+            Application.objects
+            .values("application_type_id", "application_type__name")
+            .annotate(count=Count("id"))
+            .order_by("application_type__name")
+        )
+        application_types = [
+            {
+                "application_type": row["application_type__name"],
+                "count": row["count"],
+            }
+            for row in type_rows
+        ]
+
+        submission_rows = (
+            Application.objects
+            .exclude(submitted_at__isnull=True)
+            .annotate(month=TruncMonth("submitted_at"))
+            .values("month")
+            .annotate(count=Count("id"))
+            .order_by("month")
+        )
+        monthly_submissions = self.fill_missing_months([
+            {"month": row["month"].strftime("%Y-%m"), "count": row["count"]}
+            for row in submission_rows
+            if row["month"]
+        ])
+
+        completion_rows = (
+            Application.objects
+            .exclude(completed_at__isnull=True)
+            .annotate(month=TruncMonth("completed_at"))
+            .values("month")
+            .annotate(count=Count("id"))
+            .order_by("month")
+        )
+        monthly_completions = self.fill_missing_months([
+            {"month": row["month"].strftime("%Y-%m"), "count": row["count"]}
+            for row in completion_rows
+            if row["month"]
+        ])
+
+        return Response({
+            "totals": {
+                "students": active_students.count(),
+                "faculty": User.objects.filter(
+                    user_type=UserType.FACULTY,
+                    is_active=True,
+                ).count(),
+                "staff": User.objects.filter(
+                    user_type=UserType.STAFF,
+                    is_active=True,
+                ).count(),
+                "applications": Application.objects.count(),
+            },
+            "department_distribution": department_distribution,
+            "semester_distribution": semester_distribution,
+            "application_status": status_breakdown,
+            "application_types": application_types,
+            "monthly_submissions": monthly_submissions,
+            "monthly_completions": monthly_completions,
+            "forecast": self.build_submission_forecast(monthly_submissions),
+        })
+
+    @staticmethod
+    def fill_missing_months(monthly_counts):
+        if not monthly_counts:
+            return []
+
+        from datetime import datetime
+
+        parsed_months = {
+            item["month"]: datetime.strptime(item["month"], "%Y-%m")
+            for item in monthly_counts
+        }
+        counts_by_month = {
+            item["month"]: item["count"]
+            for item in monthly_counts
+        }
+        month_indexes = [
+            month.year * 12 + month.month - 1
+            for month in parsed_months.values()
+        ]
+        first_month = min(month_indexes)
+        last_month = max(month_indexes)
+
+        return [
+            {
+                "month": f"{month_index // 12:04d}-{month_index % 12 + 1:02d}",
+                "count": counts_by_month.get(
+                    f"{month_index // 12:04d}-{month_index % 12 + 1:02d}",
+                    0,
+                ),
+            }
+            for month_index in range(first_month, last_month + 1)
+        ]
+
+    @staticmethod
+    def build_submission_forecast(monthly_submissions):
+        actual = AdminAnalyticsView.fill_missing_months(monthly_submissions)
+        active_months = sum(1 for item in actual if item["count"] > 0)
+        if len(actual) < 6 or active_months < 3:
+            return {
+                "available": False,
+                "period": "Next 3 months",
+                "message": (
+                    "At least six months of submission history with activity "
+                    "in three or more months is required."
+                ),
+                "actual": actual,
+                "predicted": [],
+            }
+
+        from datetime import datetime
+
+        points = [(index, item["count"]) for index, item in enumerate(actual)]
+        count = len(points)
+        mean_x = sum(x for x, _ in points) / count
+        mean_y = sum(y for _, y in points) / count
+        denominator = sum((x - mean_x) ** 2 for x, _ in points)
+        slope = (
+            sum((x - mean_x) * (y - mean_y) for x, y in points) / denominator
+            if denominator
+            else 0
+        )
+        intercept = mean_y - slope * mean_x
+
+        last_month = datetime.strptime(actual[-1]["month"], "%Y-%m")
+        year = last_month.year
+        month = last_month.month
+        predicted = []
+
+        for offset in range(1, 4):
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+            value = max(
+                0,
+                round(intercept + slope * (count - 1 + offset)),
+            )
+            predicted.append({
+                "month": f"{year:04d}-{month:02d}",
+                "count": value,
+            })
+
+        return {
+            "available": True,
+            "period": "Next 3 months",
+            "method": "Simple linear trend",
+            "disclaimer": "Predictions are estimates, not guaranteed outcomes.",
+            "actual": actual,
+            "predicted": predicted,
+        }
+
 
 # =========================================================
 # OFFICER INBOX VIEW

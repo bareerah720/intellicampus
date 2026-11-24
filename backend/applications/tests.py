@@ -35,6 +35,7 @@ from applications.models import (
     Workflow,
     WorkflowStep,
 )
+from applications.views import AdminAnalyticsView
 
 
 class UnifiedApplicationManagementTests(APITestCase):
@@ -638,3 +639,191 @@ class UnifiedApplicationManagementTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class AdminAnalyticsTests(APITestCase):
+    def setUp(self):
+        self.department = Department.objects.create(
+            name="Analytics Department",
+            code="ANL",
+        )
+        self.program = Program.objects.create(
+            name="BS Analytics",
+            code="BSAN",
+            department=self.department,
+            duration_years=4,
+        )
+        self.session = AcademicSession.objects.create(
+            title="Fall 2026 Analytics",
+            session_type="fall",
+            start_date=date(2026, 9, 1),
+            end_date=date(2027, 1, 31),
+            is_current=True,
+        )
+        self.semester = Semester.objects.create(
+            number=1,
+            title="Semester 1",
+        )
+        self.batch = Batch.objects.create(
+            name="Fa26-ANL",
+            program=self.program,
+            admission_year=2026,
+            graduation_year=2030,
+        )
+
+        self.admin_user = User.objects.create_user(
+            username="analytics-admin",
+            email="analytics-admin@intellicampus.test",
+            password="Test-Password-2026!",
+            user_type="admin",
+        )
+        self.student_user = User.objects.create_user(
+            username="analytics-student",
+            email="analytics-student@intellicampus.test",
+            password="Test-Password-2026!",
+            user_type="student",
+        )
+        self.faculty_user = User.objects.create_user(
+            username="analytics-faculty",
+            email="analytics-faculty@intellicampus.test",
+            password="Test-Password-2026!",
+            user_type="faculty",
+        )
+        self.staff_user = User.objects.create_user(
+            username="analytics-staff",
+            email="analytics-staff@intellicampus.test",
+            password="Test-Password-2026!",
+            user_type="staff",
+        )
+        self.student = StudentProfile.objects.create(
+            user=self.student_user,
+            registration_number="FA26-BSAN-001",
+            program=self.program,
+            batch=self.batch,
+            current_semester=self.semester,
+            academic_session=self.session,
+        )
+
+        self.office = Office.objects.create(
+            name="Analytics Office",
+            code="ANL-OFFICE",
+            department=self.department,
+        )
+        self.application_type = ApplicationType.objects.create(
+            name="Analytics Request",
+            office=self.office,
+        )
+        self.workflow = Workflow.objects.create(
+            application_type=self.application_type,
+            workflow_name="Analytics Workflow",
+            is_active=True,
+        )
+        self.step = WorkflowStep.objects.create(
+            workflow=self.workflow,
+            office=self.office,
+            step_name="Review",
+            step_order=1,
+            can_approve=True,
+        )
+
+    def test_admin_analytics_returns_real_aggregates(self):
+        Application.objects.create(
+            application_type=self.application_type,
+            student=self.student,
+            workflow=self.workflow,
+            current_step=self.step,
+            title="Analytics Application",
+            description="Test",
+            form_data={},
+            status=ApplicationStatus.APPROVED,
+            submitted_at=timezone.now(),
+            completed_at=timezone.now(),
+        )
+
+        self.client.force_authenticate(self.admin_user)
+        response = self.client.get(reverse("admin-analytics"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["totals"]["students"], 1)
+        self.assertEqual(response.data["totals"]["faculty"], 1)
+        self.assertEqual(response.data["totals"]["staff"], 1)
+        self.assertEqual(response.data["totals"]["applications"], 1)
+        self.assertEqual(response.data["application_status"]["approved"], 1)
+        self.assertEqual(
+            response.data["department_distribution"],
+            [{"department": "Analytics Department", "count": 1}],
+        )
+        self.assertEqual(
+            response.data["semester_distribution"],
+            [{"semester": "Semester 1", "number": 1, "count": 1}],
+        )
+        self.assertEqual(
+            response.data["application_types"],
+            [{"application_type": "Analytics Request", "count": 1}],
+        )
+        self.assertEqual(len(response.data["monthly_submissions"]), 1)
+        self.assertEqual(len(response.data["monthly_completions"]), 1)
+        self.assertFalse(response.data["forecast"]["available"])
+
+    def test_analytics_empty_dataset_is_safe(self):
+        self.student_user.is_active = False
+        self.student_user.save(update_fields=["is_active"])
+        self.client.force_authenticate(self.admin_user)
+        response = self.client.get(reverse("admin-analytics"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["totals"]["applications"], 0)
+        self.assertEqual(response.data["department_distribution"], [])
+        self.assertEqual(response.data["semester_distribution"], [])
+        self.assertEqual(response.data["application_types"], [])
+        self.assertEqual(response.data["monthly_submissions"], [])
+        self.assertEqual(response.data["monthly_completions"], [])
+        self.assertFalse(response.data["forecast"]["available"])
+
+    def test_analytics_requires_admin_role(self):
+        for user in (self.student_user, self.faculty_user, self.staff_user):
+            with self.subTest(user=user.username):
+                self.client.force_authenticate(user)
+                response = self.client.get(reverse("admin-analytics"))
+                self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_forecast_fills_missing_calendar_months_and_predicts_next_months(self):
+        forecast = AdminAnalyticsView.build_submission_forecast([
+            {"month": "2024-01", "count": 2},
+            {"month": "2024-03", "count": 4},
+            {"month": "2024-07", "count": 3},
+        ])
+
+        self.assertTrue(forecast["available"])
+        self.assertEqual(
+            forecast["actual"],
+            [
+                {"month": "2024-01", "count": 2},
+                {"month": "2024-02", "count": 0},
+                {"month": "2024-03", "count": 4},
+                {"month": "2024-04", "count": 0},
+                {"month": "2024-05", "count": 0},
+                {"month": "2024-06", "count": 0},
+                {"month": "2024-07", "count": 3},
+            ],
+        )
+        self.assertEqual(
+            [item["month"] for item in forecast["predicted"]],
+            ["2024-08", "2024-09", "2024-10"],
+        )
+
+    def test_forecast_requires_six_months_and_three_active_months(self):
+        sparse_activity = AdminAnalyticsView.build_submission_forecast([
+            {"month": "2023-01", "count": 1},
+            {"month": "2023-12", "count": 2},
+        ])
+        short_history = AdminAnalyticsView.build_submission_forecast([
+            {"month": "2024-01", "count": 1},
+            {"month": "2024-03", "count": 2},
+            {"month": "2024-05", "count": 3},
+        ])
+
+        self.assertFalse(sparse_activity["available"])
+        self.assertFalse(short_history["available"])
+        self.assertEqual(sparse_activity["predicted"], [])
+        self.assertEqual(short_history["predicted"], [])

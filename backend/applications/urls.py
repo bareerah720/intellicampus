@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     ApplicationTypeListCreateView,
     ApplicationTypeDetailView,
+    AdminAnalyticsView,
     ApplicationActionView,
     ApplicationResubmitView,
 
@@ -35,6 +36,11 @@ from .views import (
 
 
 urlpatterns = [
+    path(
+        "analytics/",
+        AdminAnalyticsView.as_view(),
+        name="admin-analytics",
+    ),
 
     # =====================================================
     # APPLICATION TYPES

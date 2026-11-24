@@ -19,6 +19,7 @@ import ProfilePage from './pages/ProfilePage'
 import ProfileViewPage from './pages/ProfileViewPage'
 import AdminUserEditPage from './pages/AdminUserEditPage'
 import ChangePasswordPage from './pages/ChangePasswordPage'
+import AnalyticsDashboard from './pages/AnalyticsDashboard'
 function Unauthorized() {
  return <div className="center-page"><section className="auth-card"><div className="brand-mark">i</div><h1>Access restricted</h1><p>This account does not have permission to view this page.</p><Link className="primary-button" to="/dashboard">Return to dashboard</Link></section></div>
 }
@@ -49,6 +50,7 @@ function App() {
    </Route>
    <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
     <Route path="/admin-dashboard" element={<AdminDashboard/>}/>
+    <Route path="/analytics" element={<AnalyticsDashboard/>}/>
     <Route path="/admin-applications" element={<AdminApplications />} />
     <Route path="/workflows" element={<WorkflowManagement />} />
     <Route path="/users" element={<UserManagement />} />
@@ -57,7 +59,7 @@ function App() {
    <Route element={<ProtectedRoute allowedRoles={['admin', 'faculty', 'staff']} />}>
     <Route path="/review-applications" element={<ReviewApplications />}/>
    </Route>
-   {['scholarships','opportunities','fyp','chatbot','notifications','analytics','knowledge-base','help'].map(page => (
+   {['scholarships','opportunities','fyp','chatbot','notifications','knowledge-base','help'].map(page => (
     <Route key={page} path={`/${page}`} element={<ModulePage page={page} />} />
    ))}
   </Route>
