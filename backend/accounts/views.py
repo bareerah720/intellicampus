@@ -1,6 +1,15 @@
+﻿import logging
+
+from django.conf import settings
+from django.contrib.auth.tokens import default_token_generator
+from django.core.mail import send_mail
+from django.db import transaction
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 
 
@@ -46,7 +55,37 @@ from .serializers import (
     StaffProfileSerializer,
     ResponsibilityAssignmentSerializer,
     StudentLoginSerializer,
+    EmailLoginSerializer,
+    AdminUserCreateSerializer,
+    PasswordResetConfirmSerializer,
+    UserProfileSerializer,
+    AdminUserManagementSerializer,
+    AdminSetPasswordSerializer,
 )
+
+logger = logging.getLogger(__name__)
+
+
+class LoginRateThrottle(SimpleRateThrottle):
+    scope = "login"
+
+    def get_cache_key(self, request, view):
+        request_data = getattr(request, "data", None)
+        if request_data is None:
+            request_data = getattr(request, "POST", {})
+        identifier = (
+            request_data.get("email")
+            or request_data.get("registration_number")
+            or ""
+        )
+        identifier = str(identifier).strip().casefold()
+        if not identifier:
+            return None
+        return self.cache_format % {
+            "scope": self.scope,
+            "ident": f"{self.get_ident(request)}:{identifier}",
+        }
+
 
 class AdminWritesMixin:
 
@@ -70,11 +109,61 @@ class OwnProfileQuerysetMixin:
             return queryset
 
         return queryset.filter(user=user)
-class UserListCreateView(generics.ListCreateAPIView):
+class UserListCreateView(generics.ListAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAdmin]
 
+
+class UserDetailView(generics.RetrieveUpdateAPIView):
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [IsAdmin]
+
+
+class AdminUserProfileView(generics.RetrieveAPIView):
+    queryset = User.objects.select_related(
+        "faculty_profile__department",
+        "faculty_profile__office",
+        "staff_profile__office",
+    )
+    serializer_class = UserProfileSerializer
+    permission_classes = [IsAdmin]
+
+
+class AdminUserManagementView(generics.RetrieveUpdateAPIView):
+    queryset = User.objects.select_related(
+        "faculty_profile__department",
+        "faculty_profile__office",
+        "staff_profile__office",
+    )
+    serializer_class = AdminUserManagementSerializer
+    permission_classes = [IsAdmin]
+
+    def perform_update(self, serializer):
+        with transaction.atomic():
+            serializer.save()
+
+
+class AdminUserCreateView(generics.CreateAPIView):
+    serializer_class = AdminUserCreateSerializer
+    permission_classes = [IsAdmin]
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+
+        return Response(
+            {
+                "message": "User and role profile created successfully.",
+                "user_id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "user_type": user.user_type,
+            },
+            status=status.HTTP_201_CREATED
+        )
 
 class DepartmentListCreateView(
     generics.ListCreateAPIView
@@ -244,6 +333,18 @@ class CurrentUserView(generics.RetrieveAPIView):
     def get_object(self):
         return self.request.user
 
+
+class MyProfileView(generics.RetrieveUpdateAPIView):
+    serializer_class = UserProfileSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        return self.request.user
+
+    def perform_update(self, serializer):
+        with transaction.atomic():
+            serializer.save()
+
 # =========================================================
 # STUDENT LOGIN VIEW
 # =========================================================
@@ -252,6 +353,7 @@ class StudentLoginView(generics.GenericAPIView):
 
     serializer_class = StudentLoginSerializer
     permission_classes = [AllowAny]
+    throttle_classes = [LoginRateThrottle]
 
     def post(self, request):
 
@@ -344,3 +446,186 @@ class ChangePasswordView(generics.GenericAPIView):
             },
             status=status.HTTP_200_OK
         )
+
+# =========================================================
+# EMAIL LOGIN VIEW (FACULTY / STAFF / ADMIN / EXAMINER)
+# =========================================================
+
+class EmailLoginView(generics.GenericAPIView):
+
+    serializer_class = EmailLoginSerializer
+    permission_classes = [AllowAny]
+    throttle_classes = [LoginRateThrottle]
+
+    def post(self, request):
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = serializer.validated_data["user"]
+
+        refresh = RefreshToken.for_user(user)
+
+        return Response(
+            {
+                "message": "Login successful.",
+                "refresh": str(refresh),
+                "access": str(refresh.access_token),
+                "user": {
+                    "id": user.id,
+                    "username": user.username,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "email": user.email,
+                    "user_type": user.user_type,
+                    "must_change_password": user.must_change_password,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+
+def send_password_reset_email(user):
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+    reset_url = (
+        f"{settings.FRONTEND_URL.rstrip('/')}"
+        f"/reset-password/{uid}/{token}"
+    )
+    send_mail(
+        subject="Reset your IntelliCampus password",
+        message=(
+            "We received a request to reset your IntelliCampus password. "
+            "Use the link below to choose a new password.\n\n"
+            f"{reset_url}\n\n"
+            "If you did not request this, you can ignore this email. "
+            "The link expires after one hour."
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[user.email],
+        fail_silently=False,
+    )
+
+
+class PasswordResetRequestThrottle(AnonRateThrottle):
+    rate = "5/hour"
+
+
+class PasswordResetRequestView(generics.GenericAPIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [PasswordResetRequestThrottle]
+
+    def post(self, request):
+        identifier = request.data.get("identifier", "")
+        if not isinstance(identifier, str) or not identifier.strip():
+            return Response(
+                {"detail": "Enter your registered email or student registration number."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        identifier = identifier.strip()
+        if "@" in identifier:
+            user = User.objects.filter(
+                email__iexact=identifier,
+            ).exclude(user_type="student").first()
+        else:
+            profile = StudentProfile.objects.select_related("user").filter(
+                registration_number=identifier
+            ).first()
+            user = profile.user if profile else None
+
+        if user and user.is_active:
+            try:
+                send_password_reset_email(user)
+            except Exception as error:
+                # Keep account existence private and never log the token or address.
+                logger.error(
+                    "Password reset email delivery failed (%s).",
+                    type(error).__name__,
+                )
+
+        return Response({
+            "detail": (
+                "If an active account matches those details, "
+                "password reset instructions have been sent to its registered email."
+            )
+        })
+
+
+class PasswordResetConfirmView(generics.GenericAPIView):
+    permission_classes = [AllowAny]
+    serializer_class = PasswordResetConfirmSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated_user = serializer.validated_data["user"]
+        with transaction.atomic():
+            user = User.objects.select_for_update().filter(
+                pk=validated_user.pk
+            ).first()
+            if user is None or not default_token_generator.check_token(
+                user,
+                serializer.validated_data["token"],
+            ):
+                logger.warning(
+                    "password_reset_confirm token_check=false "
+                    "reason=token_changed_before_password_save"
+                )
+                return Response(
+                    {"detail": "This password reset link is invalid or expired."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            user.set_password(serializer.validated_data["new_password"])
+            user.must_change_password = False
+            user.save(update_fields=["password", "must_change_password", "updated_at"])
+        return Response({"detail": "Password reset successfully. You can now sign in."})
+
+
+class AdminPasswordResetView(generics.GenericAPIView):
+    permission_classes = [IsAdmin]
+
+    def post(self, request, pk):
+        user = User.objects.filter(pk=pk).first()
+        if not user:
+            return Response(
+                {"detail": "User not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            send_password_reset_email(user)
+        except Exception as error:
+            logger.error(
+                "Admin-triggered password reset email delivery failed (%s).",
+                type(error).__name__,
+            )
+            return Response(
+                {"detail": "Unable to send the password reset email."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response({"detail": "Password reset email sent to the user's registered address."})
+
+
+class AdminSetPasswordView(generics.GenericAPIView):
+    serializer_class = AdminSetPasswordSerializer
+    permission_classes = [IsAdmin]
+
+    def post(self, request, pk):
+        user = User.objects.filter(pk=pk).first()
+        if user is None:
+            return Response(
+                {"detail": "User not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = self.get_serializer(
+            data=request.data,
+            context={**self.get_serializer_context(), "target_user": user},
+        )
+        serializer.is_valid(raise_exception=True)
+        user.set_password(serializer.validated_data["new_password"])
+        user.must_change_password = False
+        user.save(update_fields=["password", "must_change_password", "updated_at"])
+        return Response({"detail": "Password reset successfully."})

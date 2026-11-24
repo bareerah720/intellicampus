@@ -12,6 +12,8 @@ const PUBLIC_PATHS = [
   '/api/auth/token/',
   '/api/auth/token/refresh/',
   '/api/accounts/student-login/',
+  '/api/accounts/password-reset/',
+  '/api/accounts/password-reset/confirm/',
 ]
 
 export const apiClient = axios.create({

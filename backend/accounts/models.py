@@ -1,7 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 class UserType(models.TextChoices):
     STUDENT = "student", "Student"
@@ -124,6 +124,24 @@ class Program(models.Model):
         default=8
     )
 
+    semester_count_override = models.PositiveSmallIntegerField(
+        blank=True,
+        null=True,
+        validators=[MinValueValidator(1), MaxValueValidator(8)],
+        help_text="Approved exception to the duration-based semester count.",
+    )
+
+    semester_exception_approval_reference = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+    )
+
+    semester_exception_approval_note = models.TextField(
+        blank=True,
+        null=True,
+    )
+
     is_active = models.BooleanField(
         default=True
     )
@@ -140,6 +158,92 @@ class Program(models.Model):
         ordering = ["name"]
         verbose_name = "Program"
         verbose_name_plural = "Programs"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(duration_years__gte=1),
+                name="program_duration_positive",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        semester_count_override__isnull=True,
+                        duration_years__lte=4,
+                    )
+                    | models.Q(
+                        semester_count_override__gte=1,
+                        semester_count_override__lte=8,
+                    )
+                ),
+                name="program_effective_semesters_in_catalog",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (
+                        models.Q(semester_count_override__isnull=True)
+                        & (
+                            models.Q(semester_exception_approval_reference__isnull=True)
+                            | models.Q(semester_exception_approval_reference="")
+                        )
+                        & (
+                            models.Q(semester_exception_approval_note__isnull=True)
+                            | models.Q(semester_exception_approval_note="")
+                        )
+                    )
+                    | (
+                        models.Q(semester_count_override__isnull=False)
+                        & models.Q(semester_exception_approval_reference__isnull=False)
+                        & ~models.Q(semester_exception_approval_reference="")
+                        & models.Q(semester_exception_approval_note__isnull=False)
+                        & ~models.Q(semester_exception_approval_note="")
+                    )
+                ),
+                name="program_semester_override_requires_approval",
+            ),
+        ]
+
+    @property
+    def effective_semester_count(self):
+        if self.semester_count_override is not None:
+            return self.semester_count_override
+        return self.duration_years * 2
+
+    def clean(self):
+        super().clean()
+        errors = {}
+
+        if self.duration_years is None or self.duration_years <= 0:
+            errors["duration_years"] = "Program duration must be positive."
+
+        effective_count = (
+            self.semester_count_override
+            if self.semester_count_override is not None
+            else (self.duration_years or 0) * 2
+        )
+        if effective_count <= 0 or effective_count > 8:
+            errors["semester_count_override"] = (
+                "The effective semester count must be between 1 and 8. "
+                "Programs longer than four years need an approved override."
+            )
+
+        reference = self.semester_exception_approval_reference or ""
+        note = self.semester_exception_approval_note or ""
+        has_reference = bool(reference.strip())
+        has_note = bool(note.strip())
+        if self.semester_count_override is not None and not (has_reference and has_note):
+            errors["semester_exception_approval_reference"] = (
+                "An override requires an approval reference and note."
+            )
+        elif self.semester_count_override is None and (reference or note):
+            errors["semester_count_override"] = (
+                "Approval metadata can only be supplied with a semester override."
+            )
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.code} - {self.name}"
@@ -204,8 +308,71 @@ class AcademicSession(models.Model):
         return self.title
 
     def clean(self):
-        if self.end_date <= self.start_date:
-          raise ValidationError("End date must be after start date.")
+        super().clean()
+        errors = {}
+
+        # Existing legacy rows may be invalid. Allow unrelated edits and
+        # corrections, but reject new or changed calendar configurations that
+        # do not follow the university's Spring/Fall dates.
+        check_calendar = self.pk is None
+        if self.pk is not None:
+            previous = (
+                AcademicSession.objects.filter(pk=self.pk)
+                .values("session_type", "start_date", "end_date")
+                .first()
+            )
+            check_calendar = previous is None or any(
+                previous[field] != getattr(self, field)
+                for field in ("session_type", "start_date", "end_date")
+            )
+
+        if check_calendar:
+            if self.session_type == "spring":
+                if self.start_date and self.start_date != self.start_date.replace(
+                    month=2, day=1
+                ):
+                    errors["start_date"] = "Spring must start on February 1."
+                if self.end_date and self.start_date and self.end_date != self.start_date.replace(
+                    month=7, day=31
+                ):
+                    errors["end_date"] = "Spring must end on July 31 of the same year."
+            elif self.session_type == "fall":
+                if self.start_date and self.start_date != self.start_date.replace(
+                    month=9, day=1
+                ):
+                    errors["start_date"] = "Fall must start on September 1."
+                if self.end_date and self.start_date:
+                    expected_end = self.start_date.replace(
+                        year=self.start_date.year + 1, month=1, day=31
+                    )
+                    if self.end_date != expected_end:
+                        errors["end_date"] = (
+                            "Fall must end on January 31 of the following year."
+                        )
+            else:
+                errors["session_type"] = "Only Spring and Fall sessions are allowed."
+
+        if self.is_current:
+            already_current = (
+                self.pk is not None
+                and AcademicSession.objects.filter(
+                    pk=self.pk, is_current=True
+                ).exists()
+            )
+            if not already_current and AcademicSession.objects.filter(
+                is_current=True
+            ).exclude(pk=self.pk).exists():
+                errors["is_current"] = (
+                    "Another academic session is already marked current. "
+                    "Resolve the existing current-session records first."
+                )
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 
 ##office Model
@@ -477,6 +644,11 @@ class FacultyProfile(models.Model):
         max_length=100
     )
 
+    address = models.TextField(
+        blank=True,
+        null=True,
+    )
+
     specialization = models.CharField(
         max_length=255,
         blank=True,
@@ -544,6 +716,11 @@ class StaffProfile(models.Model):
 
     designation = models.CharField(
         max_length=100
+    )
+
+    address = models.TextField(
+        blank=True,
+        null=True,
     )
 
     joining_date = models.DateField(

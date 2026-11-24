@@ -16,22 +16,33 @@ export async function loginStudent({ registrationNumber, password }) {
   return { user: data.user, student: data.student }
 }
 
-// Faculty / Staff / Admin / External Examiner: username se login.
-// Ye endpoint sirf tokens deta hai, is liye user_type ke liye /me/ call hota hai.
-export async function loginStaff({ username, password }) {
-  const { data } = await apiClient.post('/api/auth/token/', {
-    username: username.trim(),
+// Faculty / Staff / Admin / External Examiner: email se login.
+export async function loginStaff({ email, password }) {
+  const { data } = await apiClient.post('/api/accounts/email-login/', {
+    email: email.trim(),
     password,
   })
+
   tokenStorage.set({ access: data.access, refresh: data.refresh })
 
-  try {
-    const user = await fetchCurrentUser()
-    return { user }
-  } catch (error) {
-    tokenStorage.clear()
-    throw error
-  }
+  return { user: data.user }
+}
+
+export async function requestPasswordReset(identifier) {
+  const { data } = await apiClient.post('/api/accounts/password-reset/', {
+    identifier: identifier.trim(),
+  })
+  return data
+}
+
+export async function confirmPasswordReset({ uid, token, newPassword, confirmPassword }) {
+  const { data } = await apiClient.post('/api/accounts/password-reset/confirm/', {
+    uid,
+    token,
+    new_password: newPassword,
+    confirm_password: confirmPassword,
+  })
+  return data
 }
 
 export async function changePassword({ currentPassword, newPassword }) {
@@ -42,7 +53,8 @@ export async function changePassword({ currentPassword, newPassword }) {
   return data
 }
 
-// Backend mein token blacklist nahi hai, is liye logout client-side hai.
+// Logout is currently client-side because the existing JWT configuration
+// has no blacklist dependency or server-side session table.
 export function logout() {
   tokenStorage.clear()
 }

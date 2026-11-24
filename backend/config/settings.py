@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'accounts',
     'applications',
+    'notifications'
 ]
 
 MIDDLEWARE = [
@@ -99,6 +100,31 @@ DATABASES = {
     }
 }
 
+# Password-reset messages use the console in development and SMTP in deployment.
+# Configure SMTP credentials through environment variables; never store them here.
+EMAIL_BACKEND = config(
+    'EMAIL_BACKEND',
+    default=(
+        'django.core.mail.backends.console.EmailBackend'
+        if DEBUG
+        else 'django.core.mail.backends.smtp.EmailBackend'
+    ),
+)
+EMAIL_HOST = config('EMAIL_HOST', default='')
+EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+DEFAULT_FROM_EMAIL = config(
+    'DEFAULT_FROM_EMAIL',
+    default='no-reply@intellicampus.edu',
+)
+FRONTEND_URL = config(
+    'FRONTEND_URL',
+    default='http://localhost:5173',
+)
+PASSWORD_RESET_TIMEOUT = 60 * 60
+
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -135,6 +161,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 AUTH_USER_MODEL = 'accounts.User'
 
 REST_FRAMEWORK = {
@@ -142,6 +170,9 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ),
+    "DEFAULT_THROTTLE_RATES": {
+        "login": "10/min",
+    },
 }
 
 SIMPLE_JWT = {
@@ -151,6 +182,8 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
 
     'ROTATE_REFRESH_TOKENS': True,
+    # Bind tokens to the account password so password resets revoke sessions.
+    'CHECK_REVOKE_TOKEN': True,
 
 }
 

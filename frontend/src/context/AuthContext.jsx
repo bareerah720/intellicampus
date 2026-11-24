@@ -66,7 +66,7 @@ export function AuthProvider({ children }) {
     }
 
     result = await loginStaff({
-      username: identifier,
+      email: identifier,
       password,
     })
 
@@ -89,6 +89,12 @@ export function AuthProvider({ children }) {
     return data
   }, [user])
 
+  const refreshCurrentUser = useCallback(async () => {
+    const currentUser = await fetchCurrentUser()
+    setUser(currentUser)
+    return currentUser
+  }, [])
+
   const value = {
     user,
     student,
@@ -97,6 +103,7 @@ export function AuthProvider({ children }) {
     signIn,
     signOut,
     changePassword,
+    refreshCurrentUser,
   }
 
   return (

@@ -5,6 +5,10 @@ import { useAuth } from '../hooks/useAuth'
 import {
   fetchOfficerInbox,
   reviewApplication,
+  fetchApplicationTracking,
+  fetchApplicationAttachments,
+  fetchApplicationComments,
+  createApplicationComment,
 } from '../services/applicationService'
 
 function formatStatus(status) {
@@ -27,6 +31,9 @@ function ReviewApplications() {
   const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [details, setDetails] = useState(null)
+  const [commentText, setCommentText] = useState('')
+  const [savingComment, setSavingComment] = useState(false)
 
   async function loadInbox() {
     try {
@@ -46,6 +53,29 @@ function ReviewApplications() {
   useEffect(() => {
     loadInbox()
   }, [])
+
+  useEffect(() => {
+    if (!selected?.id) {
+      setDetails(null)
+      return undefined
+    }
+
+    let active = true
+    Promise.all([
+      fetchApplicationTracking(selected.id),
+      fetchApplicationAttachments(selected.id),
+      fetchApplicationComments(selected.id),
+    ]).then(([tracking, attachments, comments]) => {
+      if (active) setDetails({ tracking, attachments, comments })
+    }).catch((error) => {
+      if (active) {
+        setDetails(null)
+        setNotice(error.response?.data?.detail || 'Unable to load application details.')
+      }
+    })
+
+    return () => { active = false }
+  }, [selected?.id])
 
   async function handleAction(action) {
     if (!selected || submitting) return
@@ -76,6 +106,24 @@ function ReviewApplications() {
       )
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleAddComment(event) {
+    event.preventDefault()
+    if (!commentText.trim() || !selected) return
+    try {
+      setSavingComment(true)
+      const created = await createApplicationComment(selected.id, commentText.trim())
+      setDetails((current) => current
+        ? { ...current, comments: [...current.comments, created] }
+        : current)
+      setCommentText('')
+      setNotice('Comment added.')
+    } catch (error) {
+      setNotice(error.response?.data?.detail || 'Could not add comment.')
+    } finally {
+      setSavingComment(false)
     }
   }
 
@@ -187,6 +235,71 @@ function ReviewApplications() {
                 </div>
               ))}
             </div>
+
+            {details?.tracking?.current_officer && (
+              <section className="communication-section">
+                <h3>Responsible Officer</h3>
+                <p>
+                  {details.tracking.current_officer.name}
+                  {details.tracking.current_officer.designation ? ` · ${details.tracking.current_officer.designation}` : ''}
+                  {details.tracking.current_officer.email ? ` · ${details.tracking.current_officer.email}` : ''}
+                  {details.tracking.current_officer.office_email ? ` · ${details.tracking.current_officer.office_email}` : ''}
+                  {details.tracking.current_officer.office_contact_number ? ` · ${details.tracking.current_officer.office_contact_number}` : ''}
+                </p>
+              </section>
+            )}
+
+            <section className="communication-section">
+              <h3>Supporting Documents</h3>
+              {!details ? <p>Loading documents...</p> : details.attachments.length === 0 ? (
+                <p className="empty-communication">No documents attached.</p>
+              ) : (
+                <div className="attachment-list">
+                  {details.attachments.map((file) => (
+                    <div className="attachment-item" key={file.id}>
+                      <a href={file.file_path} target="_blank" rel="noreferrer">{file.file_name}</a>
+                      <small>Uploaded by {file.uploaded_by_name || 'User'} · {new Date(file.uploaded_at).toLocaleString()}</small>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="communication-section">
+              <h3>Application Comments</h3>
+              <form className="comment-form" onSubmit={handleAddComment}>
+                <textarea rows={3} value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="Add a note to this application" required />
+                <button className="primary-button" type="submit" disabled={!commentText.trim() || savingComment}>
+                  {savingComment ? 'Saving...' : 'Add Comment'}
+                </button>
+              </form>
+              {!details ? <p>Loading comments...</p> : details.comments.length === 0 ? (
+                <p className="empty-communication">No comments yet.</p>
+              ) : (
+                <div className="comment-list">
+                  {details.comments.map((comment) => (
+                    <div className="comment-item" key={comment.id}>
+                      <div className="comment-heading"><strong>{comment.user_name || 'User'}</strong><small>{new Date(comment.created_at).toLocaleString()}</small></div>
+                      <p>{comment.comment}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="tracking-history">
+              <h3>Approval History</h3>
+              {!details ? <p>Loading history...</p> : details.tracking.history.length === 0 ? (
+                <p>No approval history yet.</p>
+              ) : details.tracking.history.map((entry) => (
+                <div className="history-item" key={entry.id}>
+                  <strong>{formatStatus(entry.action)}</strong>
+                  <p>{entry.step} · {entry.action_by}{entry.designation ? ` (${entry.designation})` : ''}</p>
+                  {entry.remarks && <p>{entry.remarks}</p>}
+                  <small>{new Date(entry.action_date).toLocaleString()}</small>
+                </div>
+              ))}
+            </section>
 
             <div className="review-action-panel">
               <h3>Review Decision</h3>

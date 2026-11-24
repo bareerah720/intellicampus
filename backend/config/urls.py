@@ -1,4 +1,6 @@
 from django.contrib import admin
+from django.conf import settings
+from django.conf.urls.static import static
 from django.urls import path, include
 
 from rest_framework_simplejwt.views import (
@@ -27,6 +29,13 @@ urlpatterns = [
         include("applications.urls")
     ),
 
+
+    # Module 3: Notifications
+    path(
+        "api/notifications/",
+        include("notifications.urls")
+    ),
+
     # JWT Login
     path(
         "api/auth/token/",
@@ -41,4 +50,8 @@ urlpatterns = [
         name="token_refresh",
     ),
 
+
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

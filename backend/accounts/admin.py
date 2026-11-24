@@ -114,7 +114,13 @@ class ProgramAdmin(admin.ModelAdmin):
         "department",
         "duration_years",
         "total_semesters",
+        "effective_semester_count",
         "is_active",
+    )
+
+    readonly_fields = (
+        "total_semesters",
+        "effective_semester_count",
     )
 
     list_filter = (
@@ -126,6 +132,10 @@ class ProgramAdmin(admin.ModelAdmin):
         "name",
         "code",
     )
+
+    @admin.display(description="Effective semesters")
+    def effective_semester_count(self, obj):
+        return obj.effective_semester_count
 
 
 # =========================

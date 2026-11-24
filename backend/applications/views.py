@@ -13,6 +13,9 @@ from rest_framework.views import APIView
 from accounts.models import ResponsibilityAssignment
 from accounts.permissions import IsAdminOrReadOnly
 
+from notifications.models import Notification
+from notifications.services import notify_student, notify_current_officers
+
 from .models import (
     ApplicationType,
     ApplicationField,
@@ -36,6 +39,7 @@ from .serializers import (
     ApplicationSerializer,
     AttachmentSerializer,
     ApplicationResubmitSerializer,
+    validate_dynamic_form_data,
     CommentSerializer,
     ApprovalLogSerializer,
 )
@@ -156,11 +160,10 @@ def get_officer_applications(user):
             continue
 
         # Match current office AND responsibility
-        condition = Q(
-            current_step__office_id=assignment.office_id,
-            current_step__required_responsibility=(
-                assignment.responsibility_type
-            ),
+        condition = Q(current_step__office_id=assignment.office_id) & (
+            Q(current_step__required_responsibility=assignment.responsibility_type)
+            | Q(current_step__required_responsibility__isnull=True)
+            | Q(current_step__required_responsibility="")
         )
 
         # Match department if assignment is
@@ -236,6 +239,7 @@ class ApplicationListCreateView(
         # Faculty/staff use dedicated officer inbox
         return Application.objects.none()
 
+    @transaction.atomic
     def perform_create(self, serializer):
 
         if self.request.user.user_type != "student":
@@ -244,7 +248,21 @@ class ApplicationListCreateView(
                 "Only students can submit applications."
             )
 
-        serializer.save()
+        application = serializer.save()
+
+        notify_student(
+            application,
+            "Application Submitted",
+            f"Your application {application.tracking_number} has been submitted successfully.",
+            Notification.NotificationType.APPLICATION_SUBMITTED,
+        )
+
+        notify_current_officers(
+            application,
+            "New Application Received",
+            f"A new application {application.tracking_number} is waiting for your review.",
+            Notification.NotificationType.APPLICATION_SUBMITTED,
+        )
 
 
 # =========================================================
@@ -643,6 +661,13 @@ class ApplicationActionView(APIView):
         action = request.data.get("action")
 
         remarks = request.data.get("remarks", "")
+        if remarks is None:
+            remarks = ""
+        if not isinstance(remarks, str):
+            return Response(
+                {"detail": "Remarks must be text."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         valid_actions = [
             ActionType.APPROVED,
@@ -663,6 +688,12 @@ class ApplicationActionView(APIView):
                         "rejected, or revision_required."
                     )
                 },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if action in (ActionType.REJECTED, ActionType.REVISION_REQUIRED) and not remarks.strip():
+            return Response(
+                {"detail": "Remarks are required for rejection or revision requests."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -936,6 +967,13 @@ class ApplicationActionView(APIView):
                     ]
                 )
 
+
+                notify_student(
+                    application,
+                    "Application Rejected",
+                    f"Your application {application.tracking_number} has been rejected. Remarks: {remarks or 'No remarks provided.'}",
+                    Notification.NotificationType.APPLICATION_REJECTED,
+                )
                 return Response(
                     {
                         "message": (
@@ -979,6 +1017,13 @@ class ApplicationActionView(APIView):
                     ]
                 )
 
+
+                notify_student(
+                    application,
+                    "Revision Required",
+                    f"Your application {application.tracking_number} requires revision. Remarks: {remarks or 'Please review and correct your application.'}",
+                    Notification.NotificationType.REVISION_REQUIRED,
+                )
                 return Response(
                     {
                         "message": (
@@ -1041,6 +1086,21 @@ class ApplicationActionView(APIView):
                     ]
                 )
 
+
+                notify_student(
+                    application,
+                    "Application Forwarded",
+                    f"Your application {application.tracking_number} has been approved at {current_step.step_name} and forwarded to {next_step.step_name}.",
+                    Notification.NotificationType.APPLICATION_FORWARDED,
+                )
+
+                notify_current_officers(
+                    application,
+                    "Application Forwarded to Your Office",
+                    f"Application {application.tracking_number} is now waiting for your review.",
+                    Notification.NotificationType.APPLICATION_FORWARDED,
+                )
+
                 return Response(
                     {
                         "message": (
@@ -1093,6 +1153,14 @@ class ApplicationActionView(APIView):
                     "completed_at",
                     "updated_at",
                 ]
+            )
+
+
+            notify_student(
+                application,
+                "Application Approved",
+                f"Congratulations! Your application {application.tracking_number} has been fully approved.",
+                Notification.NotificationType.APPLICATION_APPROVED,
             )
 
             return Response(
@@ -1166,14 +1234,6 @@ class ApplicationResubmitView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        serializer = ApplicationResubmitSerializer(
-            data=request.data
-        )
-
-        serializer.is_valid(
-            raise_exception=True
-        )
-
         with transaction.atomic():
 
             try:
@@ -1233,6 +1293,12 @@ class ApplicationResubmitView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+            serializer = ApplicationResubmitSerializer(
+                data=request.data,
+                context={"application_type": application.application_type},
+            )
+            serializer.is_valid(raise_exception=True)
+
             # Apply corrected data
 
             data = serializer.validated_data
@@ -1285,6 +1351,20 @@ class ApplicationResubmitView(APIView):
                 ),
             )
 
+
+            notify_student(
+                application,
+                "Application Resubmitted",
+                f"Your corrected application {application.tracking_number} has been resubmitted successfully.",
+                Notification.NotificationType.APPLICATION_RESUBMITTED,
+            )
+
+            notify_current_officers(
+                application,
+                "Application Resubmitted",
+                f"Corrected application {application.tracking_number} is waiting for your review.",
+                Notification.NotificationType.APPLICATION_RESUBMITTED,
+            )
             return Response(
                 {
                     "message":
@@ -1357,13 +1437,29 @@ class ApplicationTrackingView(APIView):
                 student__user=user,
             )
 
+        elif user.user_type in ("faculty", "staff"):
+            application = get_object_or_404(
+                get_officer_applications(user).select_related(
+                    "student",
+                    "student__user",
+                    "student__program",
+                    "student__program__department",
+                    "student__batch",
+                    "application_type",
+                    "workflow",
+                    "current_step",
+                    "current_step__office",
+                ),
+                pk=pk,
+            )
+
         else:
 
             return Response(
                 {
                     "detail":
-                    "Only the student who owns the application "
-                    "or an admin can track it."
+                    "Only the student who owns the application, "
+                    "an assigned officer, or an admin can track it."
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
@@ -1396,9 +1492,6 @@ class ApplicationTrackingView(APIView):
             assignments = (
                 ResponsibilityAssignment.objects
                 .filter(
-                    responsibility_type=(
-                        application.current_step.required_responsibility
-                    ),
                     office=application.current_step.office,
                     is_active=True,
                     start_date__lte=today,
@@ -1408,6 +1501,13 @@ class ApplicationTrackingView(APIView):
                     Q(end_date__gte=today)
                 )
             )
+
+            if application.current_step.required_responsibility:
+                assignments = assignments.filter(
+                    responsibility_type=(
+                        application.current_step.required_responsibility
+                    )
+                )
 
             # -----------------------------------------
             # Advisor -> exact student batch
@@ -1523,6 +1623,13 @@ class ApplicationTrackingView(APIView):
                         if assignment.office
                         else None
                     ),
+
+                    "office_contact_number": (
+                        assignment.office.contact_number
+                        if assignment.office
+                        else None
+                    ),
+
                 }
 
         # ---------------------------------------------
@@ -1609,10 +1716,10 @@ class ApplicationTrackingView(APIView):
         # -----------------------------------------
 
             if log.action == ActionType.APPROVED:
-                responsibility = None
-            if log.workflow_step.required_responsibility:
                 responsibility = (
                     log.workflow_step.get_required_responsibility_display()
+                    if log.workflow_step.required_responsibility
+                    else "Authorized officer"
                 )
                 office = log.workflow_step.office
                 approval_stamps.append({

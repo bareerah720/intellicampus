@@ -1,0 +1,27 @@
+.admin-user-edit-page { max-width: 1120px; }
+.admin-edit-form { padding: 22px; margin: 0; }
+.admin-edit-identity { display: flex; align-items: center; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid #edf1f0; }
+.admin-edit-identity img, .admin-edit-photo-fallback { width: 68px; height: 68px; flex: 0 0 68px; border-radius: 50%; object-fit: cover; border: 3px solid #e5f3ec; }
+.admin-edit-photo-fallback { display: grid; place-items: center; background: #dff1e9; color: #176b67; font: 800 23px Manrope, sans-serif; }
+.admin-edit-identity h2 { margin: 0 0 6px; color: #163b46; font: 800 18px Manrope, sans-serif; }
+.admin-edit-identity p { margin: 0; color: #75858d; font-size: 11px; overflow-wrap: anywhere; text-transform: capitalize; }
+.admin-edit-section { padding: 21px 0; border-bottom: 1px solid #edf1f0; }
+.admin-edit-section h2 { margin: 0 0 15px; color: #24464e; font: 800 14px Manrope, sans-serif; }
+.admin-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+.admin-edit-field { min-width: 0; display: grid; align-content: start; gap: 7px; color: #53666e; font-size: 11px; font-weight: 700; }
+.admin-edit-field input:not([type="checkbox"]), .admin-edit-field select, .admin-edit-field textarea { width: 100%; min-width: 0; border: 1px solid #dfe8e4; border-radius: 8px; background: #fff; padding: 10px 11px; color: #29464e; font-size: 12px; }
+.admin-edit-field textarea { resize: vertical; }
+.admin-edit-field input[type="file"] { padding: 7px; font-size: 10px; }
+.admin-readonly-field strong { min-height: 36px; display: flex; align-items: center; border: 1px solid #e9efed; border-radius: 8px; background: #f6f8f7; padding: 8px 11px; color: #677b80; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; text-transform: capitalize; }
+.admin-checkbox-field { display: flex; align-items: center; justify-content: space-between; min-height: 37px; flex-direction: row; }
+.admin-checkbox-field input { width: 17px; height: 17px; accent-color: #176b67; }
+.wide-field { grid-column: 1 / -1; }
+.admin-edit-responsibilities { margin: 0 0 12px; padding-left: 20px; color: #53666e; font-size: 12px; line-height: 1.8; }
+.admin-edit-actions { position: sticky; bottom: 0; display: flex; justify-content: flex-end; gap: 10px; padding: 15px 0 0; background: #fff; }
+@media (max-width: 600px) {
+  .admin-edit-form { padding: 16px; }
+  .admin-edit-grid { grid-template-columns: 1fr; }
+  .wide-field { grid-column: auto; }
+  .admin-edit-actions { justify-content: stretch; }
+  .admin-edit-actions button { flex: 1; }
+}

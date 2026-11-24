@@ -8,6 +8,10 @@ import {
   submitApplication,
   fetchApplicationTracking,
   resubmitApplication,
+  fetchApplicationAttachments,
+  uploadApplicationAttachment,
+  fetchApplicationComments,
+  createApplicationComment,
 } from '../services/applicationService'
 
 function getStatusClass(status) {
@@ -24,11 +28,27 @@ function formatStatus(status) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
+function formatApplication(app) {
+  return {
+    id: app.id,
+    trackingNumber: app.tracking_number,
+    type: app.application_type_name,
+    applicationTypeId: app.application_type,
+    date: app.submitted_at
+      ? new Date(app.submitted_at).toLocaleDateString()
+      : '',
+    status: app.status,
+    currentStep: app.current_step_name || 'Not assigned yet',
+    data: app.form_data || {},
+    comments: [],
+    attachments: [],
+  }
+}
+
 function Applications() {
   const { user } = useAuth()
 
   const role = user?.user_type || 'student'
-  const currentUser = user?.username || user?.first_name || 'Student'
 
   // Application setup states
   const [requestTypes, setRequestTypes] = useState([])
@@ -52,6 +72,10 @@ function Applications() {
   const [editingApplication, setEditingApplication] = useState(null)
   const [trackingHistory, setTrackingHistory] = useState([])
   const [loadingTracking, setLoadingTracking] = useState(false)
+  const [currentOfficer, setCurrentOfficer] = useState(null)
+  const [fieldFiles, setFieldFiles] = useState({})
+  const [existingAttachments, setExistingAttachments] = useState([])
+  const [savingCommunication, setSavingCommunication] = useState(false)
 
   // Load application types and dynamic fields
   useEffect(() => {
@@ -85,21 +109,7 @@ function Applications() {
 
         const data = await fetchMyApplications()
 
-        const formattedApplications = data.map((app) => ({
-          id: app.id,
-          trackingNumber: app.tracking_number,
-          type: app.application_type_name,
-          applicationTypeId: app.application_type,
-          date: app.submitted_at
-            ? new Date(app.submitted_at).toLocaleDateString()
-            : '',
-          status: app.status,
-          currentStep: app.current_step_name || 'Not assigned yet',
-          data: app.form_data || {},
-          comments: [],
-          attachments: [],
-          approvalHistory: [],
-        }))
+        const formattedApplications = (Array.isArray(data) ? data : data?.results || []).map(formatApplication)
 
         setApplications(formattedApplications)
       } catch (error) {
@@ -125,19 +135,25 @@ function Applications() {
     async function loadTracking() {
       try {
         setLoadingTracking(true)
-
-        const tracking = await fetchApplicationTracking(
-          selectedApplication.id
-        )
+        const [tracking, attachments, comments] = await Promise.all([
+          fetchApplicationTracking(selectedApplication.id),
+          fetchApplicationAttachments(selectedApplication.id),
+          fetchApplicationComments(selectedApplication.id),
+        ])
 
         if (isActive) {
           setTrackingHistory(tracking.history || [])
+          setCurrentOfficer(tracking.current_officer || null)
+          setSelectedApplication((current) => current?.id === selectedApplication.id
+            ? { ...current, attachments, comments }
+            : current)
         }
       } catch (error) {
         console.error('Application tracking error:', error)
 
         if (isActive) {
           setTrackingHistory([])
+          setCurrentOfficer(null)
         }
       } finally {
         if (isActive) {
@@ -191,6 +207,17 @@ function Applications() {
 
       // Revision resubmission
       if (editingApplication) {
+        const missingRequiredFiles = selected.fields.filter(
+          (field) => field.field_type === 'file'
+            && field.is_required
+            && !fieldFiles[field.field_name]
+            && existingAttachments.length === 0
+        )
+        if (missingRequiredFiles.length) {
+          setNotice(`Upload required file(s): ${missingRequiredFiles.map((field) => field.label).join(', ')}.`)
+          return
+        }
+
         const resubmissionData = { ...applicationData }
 
         // The backend rejects a blank description, so only send it when non-empty.
@@ -203,35 +230,36 @@ function Applications() {
           resubmissionData
         )
 
-        const data = await fetchMyApplications()
+        const uploadResults = await Promise.allSettled(
+          Object.values(fieldFiles).map((file) =>
+            uploadApplicationAttachment(editingApplication.id, file)
+          )
+        )
 
-        const formattedApplications = data.map((app) => ({
-          id: app.id,
-          trackingNumber: app.tracking_number,
-          type: app.application_type_name,
-          applicationTypeId: app.application_type,
-          date: app.submitted_at
-            ? new Date(app.submitted_at).toLocaleDateString()
-            : '',
-          status: app.status,
-          currentStep: app.current_step_name || 'Not assigned yet',
-          data: app.form_data || {},
-          comments: [],
-          attachments: [],
-          approvalHistory: [],
-        }))
+        const data = await fetchMyApplications()
+        const formattedApplications = (Array.isArray(data) ? data : data?.results || []).map(formatApplication)
 
         setApplications(formattedApplications)
         setSelectedApplication(null)
         setEditingApplication(null)
         setSelected(null)
         setFormData({})
+        setFieldFiles({})
+        setExistingAttachments([])
 
-        setNotice(
-          `Application ${editingApplication.trackingNumber} resubmitted successfully!`
-        )
+        setNotice(uploadResults.some((result) => result.status === 'rejected')
+          ? `Application ${editingApplication.trackingNumber} was resubmitted, but an attachment upload failed.`
+          : `Application ${editingApplication.trackingNumber} resubmitted successfully!`)
 
       } else {
+        const missingRequiredFiles = selected.fields.filter(
+          (field) => field.field_type === 'file' && field.is_required && !fieldFiles[field.field_name]
+        )
+        if (missingRequiredFiles.length) {
+          setNotice(`Upload required file(s): ${missingRequiredFiles.map((field) => field.label).join(', ')}.`)
+          return
+        }
+
         // New application submission
         const savedApplication = await submitApplication({
           application_type: selected.id,
@@ -239,6 +267,12 @@ function Applications() {
           description: selected.description || '',
           form_data: formData,
         })
+
+        const uploadResults = await Promise.allSettled(
+          Object.values(fieldFiles).map((file) =>
+            uploadApplicationAttachment(savedApplication.id, file)
+          )
+        )
 
         const newApplication = {
           id: savedApplication.id,
@@ -252,8 +286,9 @@ function Applications() {
           currentStep: savedApplication.current_step_name || 'Not assigned yet',
           data: savedApplication.form_data || {},
           comments: [],
-          attachments: [],
-          approvalHistory: [],
+          attachments: uploadResults
+            .filter((result) => result.status === 'fulfilled')
+            .map((result) => result.value),
         }
 
         setApplications((previous) => [
@@ -263,10 +298,13 @@ function Applications() {
 
         setSelected(null)
         setFormData({})
+        setFieldFiles({})
+        setExistingAttachments([])
 
-        setNotice(
-          `Application submitted successfully! Tracking Number: ${savedApplication.tracking_number}`
-        )
+        const failedUploads = uploadResults.some((result) => result.status === 'rejected')
+        setNotice(failedUploads
+          ? `Application ${savedApplication.tracking_number} was submitted, but an attachment upload failed. Open the application and retry the missing file.`
+          : `Application submitted successfully! Tracking Number: ${savedApplication.tracking_number}`)
       }
 
     } catch (error) {
@@ -298,6 +336,8 @@ function Applications() {
     setEditingApplication(application)
     setSelected(applicationType)
     setFormData(application.data || {})
+    setExistingAttachments(application.attachments || [])
+    setFieldFiles({})
     setSelectedApplication(null)
     setNotice('')
   }
@@ -309,63 +349,49 @@ function Applications() {
     setFormData({})
     setCommentText('')
     setAttachmentFile(null)
+    setFieldFiles({})
+    setExistingAttachments([])
   }
 
-  // Demo comment functionality
-  function addComment(e) {
+  async function addComment(e) {
     e.preventDefault()
 
     if (!commentText.trim() || !selectedApplication) return
-
-    const newComment = {
-      id: `COMMENT-${Date.now()}`,
-      comment: commentText.trim(),
-      user: currentUser,
-      createdAt: new Date().toLocaleString(),
+    try {
+      setSavingCommunication(true)
+      const created = await createApplicationComment(selectedApplication.id, commentText.trim())
+      setSelectedApplication((current) => ({
+        ...current,
+        comments: [...(current.comments || []), created],
+      }))
+      setCommentText('')
+      setNotice('Comment added.')
+    } catch (error) {
+      setNotice(error.response?.data?.detail || 'Could not add comment.')
+    } finally {
+      setSavingCommunication(false)
     }
-
-    const updated = applications.map((app) =>
-      app.id === selectedApplication.id
-        ? {
-            ...app,
-            comments: [...(app.comments || []), newComment],
-          }
-        : app
-    )
-
-    saveApplications(updated)
-    setCommentText('')
-    setNotice('Comment added in this session.')
   }
 
-  // Demo attachment functionality
-  function addAttachment(e) {
+  async function addAttachment(e) {
     e.preventDefault()
 
     if (!attachmentFile || !selectedApplication) return
-
-    const newAttachment = {
-      id: `FILE-${Date.now()}`,
-      fileName: attachmentFile.name,
-      fileSize: attachmentFile.size,
-      fileType: attachmentFile.type,
-      uploadedBy: currentUser,
-      uploadedAt: new Date().toLocaleString(),
+    try {
+      setSavingCommunication(true)
+      const created = await uploadApplicationAttachment(selectedApplication.id, attachmentFile)
+      setSelectedApplication((current) => ({
+        ...current,
+        attachments: [...(current.attachments || []), created],
+      }))
+      setAttachmentFile(null)
+      e.target.reset()
+      setNotice('Attachment uploaded.')
+    } catch (error) {
+      setNotice(error.response?.data?.detail || 'Could not upload attachment.')
+    } finally {
+      setSavingCommunication(false)
     }
-
-    const updated = applications.map((app) =>
-      app.id === selectedApplication.id
-        ? {
-            ...app,
-            attachments: [...(app.attachments || []), newAttachment],
-          }
-        : app
-    )
-
-    saveApplications(updated)
-    setAttachmentFile(null)
-    e.target.reset()
-    setNotice('Attachment added in this session.')
   }
 
   // Render database-driven form fields
@@ -380,6 +406,19 @@ function Applications() {
     }
 
     switch (field.field_type) {
+      case 'file':
+        return (
+          <input
+            id={field.field_name}
+            name={field.field_name}
+            type="file"
+            required={field.is_required && existingAttachments.length === 0}
+            onChange={(event) => setFieldFiles((previous) => ({
+              ...previous,
+              [field.field_name]: event.target.files?.[0] || null,
+            }))}
+          />
+        )
       case 'textarea':
         return <textarea {...commonProps} rows={4} />
 
@@ -519,6 +558,20 @@ function Applications() {
                 </span>
               </div>
 
+              {currentOfficer && (
+                <div className="application-list-item">
+                  <strong>Responsible Officer</strong>
+                  <span>
+                    {currentOfficer.name}
+                    {currentOfficer.designation ? ` · ${currentOfficer.designation}` : ''}
+                    {currentOfficer.email ? ` · ${currentOfficer.email}` : ''}
+                    {currentOfficer.office_email ? ` · ${currentOfficer.office_email}` : ''}
+                    {currentOfficer.office_contact_number ? ` · ${currentOfficer.office_contact_number}` : ''}
+                    {currentOfficer.office_location ? ` · ${currentOfficer.office_location}` : ''}
+                  </span>
+                </div>
+              )}
+
               {Object.entries(selectedApplication.data || {}).map(
                 ([field, value]) => (
                   <div className="application-list-item" key={field}>
@@ -595,12 +648,9 @@ function Applications() {
 
             <div className="communication-section">
               <h3>Supporting Documents</h3>
-              <p className="muted-note">
-                Attachment details are currently temporary and are not uploaded
-                to the backend.
-              </p>
+              <p className="muted-note">Documents are stored with this application.</p>
 
-              <form className="attachment-form" onSubmit={addAttachment}>
+              {!['approved', 'rejected', 'cancelled'].includes(selectedApplication.status) && <form className="attachment-form" onSubmit={addAttachment}>
                 <input
                   type="file"
                   onChange={(e) =>
@@ -609,10 +659,10 @@ function Applications() {
                   required
                 />
 
-                <button type="submit" className="primary-button">
-                  Add Attachment
+                <button type="submit" className="primary-button" disabled={savingCommunication}>
+                  {savingCommunication ? 'Uploading...' : 'Add Attachment'}
                 </button>
-              </form>
+              </form>}
 
               {(selectedApplication.attachments || []).length === 0 ? (
                 <p className="empty-communication">
@@ -625,9 +675,9 @@ function Applications() {
                       <span className="attachment-icon">📎</span>
 
                       <div>
-                        <strong>{file.fileName}</strong>
+                        <a href={file.file_path} target="_blank" rel="noreferrer"><strong>{file.file_name}</strong></a>
                         <small>
-                          Uploaded by {file.uploadedBy} · {file.uploadedAt}
+                          Uploaded by {file.uploaded_by_name || 'User'} · {new Date(file.uploaded_at).toLocaleString()}
                         </small>
                       </div>
                     </div>
@@ -654,9 +704,9 @@ function Applications() {
                 <button
                   type="submit"
                   className="primary-button"
-                  disabled={!commentText.trim()}
+                  disabled={!commentText.trim() || savingCommunication}
                 >
-                  Add Comment
+                  {savingCommunication ? 'Saving...' : 'Add Comment'}
                 </button>
               </form>
 
@@ -667,8 +717,8 @@ function Applications() {
                   {selectedApplication.comments.map((comment) => (
                     <div className="comment-item" key={comment.id}>
                       <div className="comment-heading">
-                        <strong>{comment.user}</strong>
-                        <small>{comment.createdAt}</small>
+                        <strong>{comment.user_name || 'User'}</strong>
+                        <small>{new Date(comment.created_at).toLocaleString()}</small>
                       </div>
 
                       <p>{comment.comment}</p>
@@ -678,10 +728,7 @@ function Applications() {
               )}
             </div>
 
-            <p className="muted-note">
-              Comments and attachment details are temporary and will reset
-              when this page is refreshed.
-            </p>
+            <p className="muted-note">Comments and attachments are saved to this application record.</p>
           </section>
         ) : selected ? (
           <section className="panel application-form-panel">

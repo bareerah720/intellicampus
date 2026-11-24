@@ -1,0 +1,5 @@
+.profile-view-grid { padding-top: 8px; }
+.profile-view-grid .profile-detail { min-height: 72px; }
+@media (max-width: 600px) {
+  .profile-view-grid .profile-detail { min-height: 0; }
+}

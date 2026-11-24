@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
+from decimal import Decimal, InvalidOperation
 
 from accounts.models import StudentProfile
 
@@ -15,6 +16,78 @@ from .models import (
     Comment,
     ApprovalLog,
 )
+
+
+def validate_dynamic_form_data(application_type, form_data):
+    if not isinstance(form_data, dict):
+        raise serializers.ValidationError({
+            "form_data": "Form data must be a JSON object."
+        })
+
+    errors = {}
+    configured_fields = list(
+        application_type.fields.prefetch_related("options").all()
+    )
+    configured_names = {field.field_name for field in configured_fields}
+    unknown_names = set(form_data) - configured_names
+    if unknown_names:
+        errors["form_data"] = (
+            "Unknown field(s): " + ", ".join(sorted(unknown_names))
+        )
+
+    for field in configured_fields:
+        value = form_data.get(field.field_name)
+        empty = value is None or value == "" or value == []
+
+        # Files are uploaded through the Attachment API, not JSON form_data.
+        if field.field_type == "file":
+            if field.field_name in form_data:
+                errors[field.field_name] = (
+                    "Upload this file as an application attachment."
+                )
+            continue
+
+        if field.is_required and empty:
+            errors[field.field_name] = "This field is required."
+            continue
+        if empty:
+            continue
+
+        if field.field_type in ("dropdown", "radio"):
+            choices = set(field.options.values_list("value", flat=True))
+            if str(value) not in choices:
+                errors[field.field_name] = "Select a configured option."
+        elif field.field_type == "checkbox":
+            choices = set(field.options.values_list("value", flat=True))
+            if not isinstance(value, list) or any(
+                str(item) not in choices for item in value
+            ):
+                errors[field.field_name] = "Select one or more configured options."
+        elif field.field_type == "number":
+            try:
+                number = Decimal(str(value))
+                if not number.is_finite():
+                    raise InvalidOperation
+            except (InvalidOperation, ValueError):
+                errors[field.field_name] = "Enter a valid number."
+        elif field.field_type == "email":
+            try:
+                serializers.EmailField().run_validation(value)
+            except serializers.ValidationError:
+                errors[field.field_name] = "Enter a valid email address."
+        elif field.field_type == "date":
+            try:
+                serializers.DateField().run_validation(value)
+            except serializers.ValidationError:
+                errors[field.field_name] = "Enter a valid date."
+        elif not isinstance(value, str):
+            errors[field.field_name] = "Enter text for this field."
+
+    if errors:
+        raise serializers.ValidationError(errors)
+    return form_data
+
+
 # =========================================================
 # APPLICATION TYPE SERIALIZER
 # =========================================================
@@ -224,6 +297,11 @@ class ApplicationSerializer(serializers.ModelSerializer):
         read_only=True
     )
 
+    department_name = serializers.CharField(
+        source="student.program.department.name",
+        read_only=True,
+    )
+
     class Meta:
         model = Application
 
@@ -235,6 +313,7 @@ class ApplicationSerializer(serializers.ModelSerializer):
             "student",
             "student_name",
             "registration_number",
+            "department_name",
             "workflow",
             "workflow_name",
             "current_step",
@@ -263,6 +342,7 @@ class ApplicationSerializer(serializers.ModelSerializer):
             # Display-only
             "student_name",
             "registration_number",
+            "department_name",
             "application_type_name",
             "workflow_name",
             "current_step_name",
@@ -274,6 +354,7 @@ class ApplicationSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+
     def validate(self, attrs):
 
         application_type = attrs.get("application_type")
@@ -283,52 +364,65 @@ class ApplicationSerializer(serializers.ModelSerializer):
                 "application_type": "Application type is required."
             })
 
-        # Find active workflow for selected application type
-        # Find active workflows for selected application type
-        
+        if not application_type.is_active:
+            raise serializers.ValidationError({
+                "application_type": (
+                    "This application type is not accepting submissions."
+                )
+            })
+
+        validate_dynamic_form_data(
+            application_type,
+            attrs.get("form_data", {}),
+        )
+
+        # Find the active workflow for this application type.
         workflows = list(
             Workflow.objects.filter(
-            application_type=application_type,
-            is_active=True
+                application_type=application_type,
+                is_active=True
             )[:2]
-            )
+        )
+
         if not workflows:
             raise serializers.ValidationError({
-                "application_type":  "No active workflow exists for this application type."
+                "application_type": (
+                    "No active workflow exists for this application type."
+                )
             })
 
         if len(workflows) > 1:
             raise serializers.ValidationError({
-                "application_type":
-                "Multiple active workflows exist. "
-                "Admin must keep only one active workflow."
-    })
-        
+                "application_type": (
+                    "Multiple active workflows exist. "
+                    "Admin must keep only one active workflow."
+                )
+            })
+
         workflow = workflows[0]
-        # Find first step of workflow
+
+        # Skip initial non-approval steps such as Student Submission.
+        # Assign the first step where an officer can actually approve.
         current_step = (
-    workflow.steps
-    .filter(
-        required_responsibility__isnull=False
-    )
-    .exclude(
-        required_responsibility=""
-    )
-    .order_by("step_order")
-    .first()
-)
+            workflow.steps
+            .filter(can_approve=True)
+            .order_by("step_order")
+            .first()
+        )
+
         if not current_step:
             raise serializers.ValidationError({
-        "application_type": (
-            "The selected application type has "
-            "no approval workflow steps."
-        )
-    })
-        # Store automatically selected objects
+                "application_type": (
+                    "The selected workflow has no approvable steps."
+                )
+            })
+
+        # Store automatically selected objects.
         attrs["workflow"] = workflow
         attrs["current_step"] = current_step
-        
+
         return attrs
+
 
     def create(self, validated_data):
         request = self.context.get("request")
@@ -521,6 +615,13 @@ class ApplicationResubmitSerializer(
 
             raise serializers.ValidationError(
                 "Provide at least one field to correct."
+            )
+
+        application_type = self.context.get("application_type")
+        if application_type is not None and "form_data" in attrs:
+            validate_dynamic_form_data(
+                application_type,
+                attrs["form_data"],
             )
 
         return attrs

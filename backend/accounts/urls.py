@@ -1,4 +1,4 @@
-from django.urls import path
+﻿from django.urls import path
 
 from .views import (
     AcademicSessionDetailView,
@@ -13,6 +13,8 @@ from .views import (
     StaffProfileDetailView,
     StudentProfileDetailView,
     UserListCreateView,
+    AdminUserCreateView,
+    UserDetailView,
     DepartmentListCreateView,
     ProgramListCreateView,
     SemesterListCreateView,
@@ -24,11 +26,41 @@ from .views import (
     StaffProfileListCreateView,
     ResponsibilityAssignmentListCreateView,
     StudentLoginView,
+    EmailLoginView,
     ChangePasswordView,
+    PasswordResetRequestView,
+    PasswordResetConfirmView,
+    AdminPasswordResetView,
+    AdminUserProfileView,
+    AdminUserManagementView,
+    AdminSetPasswordView,
+    MyProfileView,
 )
 
 urlpatterns = [
     path("users/", UserListCreateView.as_view(), name="user-list-create"),
+    path("admin-users/", AdminUserCreateView.as_view(), name="admin-user-create"),
+    path("users/<int:pk>/", UserDetailView.as_view(), name="user-detail"),
+    path(
+        "users/<int:pk>/profile/",
+        AdminUserProfileView.as_view(),
+        name="admin-user-profile",
+    ),
+    path(
+        "users/<int:pk>/management-profile/",
+        AdminUserManagementView.as_view(),
+        name="admin-user-management-profile",
+    ),
+    path(
+        "users/<int:pk>/set-password/",
+        AdminSetPasswordView.as_view(),
+        name="admin-user-set-password",
+    ),
+    path(
+        "users/<int:pk>/password-reset/",
+        AdminPasswordResetView.as_view(),
+        name="admin-user-password-reset",
+    ),
 
     path(
         "departments/",
@@ -155,7 +187,29 @@ urlpatterns = [
     CurrentUserView.as_view(),
     name="current-user",
 ),
+    path(
+        "me/profile/",
+        MyProfileView.as_view(),
+        name="my-profile",
+    ),
 
+
+
+    path(
+        "email-login/",
+        EmailLoginView.as_view(),
+        name="email-login",
+    ),
+    path(
+        "password-reset/",
+        PasswordResetRequestView.as_view(),
+        name="password-reset-request",
+    ),
+    path(
+        "password-reset/confirm/",
+        PasswordResetConfirmView.as_view(),
+        name="password-reset-confirm",
+    ),
 
     path(
     "student-login/",

@@ -536,3 +536,291 @@
   border-color: var(--teal);
   box-shadow: 0 0 0 3px #176b6712;
 }
+
+.notification-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
+  border-radius: 20px;
+  background: #d9534f;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* Workflow management checkbox alignment */
+.checkbox-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid #e5eceb;
+  border-radius: 9px;
+  background: #fbfdfc;
+  cursor: pointer;
+}
+
+.checkbox-row span {
+  line-height: 1.4;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: 17px !important;
+  height: 17px;
+  flex: 0 0 17px;
+  margin: 0;
+  padding: 0 !important;
+  accent-color: #176b67;
+  cursor: pointer;
+}
+
+/* =========================================
+   ADMIN USER MANAGEMENT
+========================================= */
+
+.user-management-page .user-management-heading {
+  align-items: center;
+}
+
+.user-management-page .user-management-heading .primary-button {
+  white-space: nowrap;
+}
+
+.user-management-page .user-metrics {
+  margin-bottom: 24px;
+}
+
+.user-management-page .user-metrics .metric-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.user-management-page .user-metrics .metric-card strong {
+  font-size: 30px;
+}
+
+.user-management-page .user-management-form {
+  padding-bottom: 22px;
+}
+
+.user-management-page .user-management-form .form-grid {
+  padding: 22px;
+  gap: 18px;
+}
+
+.user-management-page .user-management-form .form-grid label {
+  display: grid;
+  gap: 8px;
+  color: #40565d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.user-management-page .user-management-form input,
+.user-management-page .user-management-form select {
+  width: 100%;
+  min-width: 0;
+  padding: 12px 13px;
+  border: 1px solid #dce6e5;
+  border-radius: 9px;
+  background: #fff;
+  color: #29464d;
+  font-size: 12px;
+  outline: none;
+}
+
+.user-management-page .user-management-form input:focus,
+.user-management-page .user-management-form select:focus {
+  border-color: #60a79b;
+  box-shadow: 0 0 0 3px #dff1e9;
+}
+
+.user-management-page .user-form-actions {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 10px;
+  padding: 0 22px;
+  margin-top: 20px;
+}
+
+.user-management-page .user-filter-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 190px 160px;
+  gap: 12px;
+  padding: 20px 22px;
+  margin: 0;
+}
+
+.user-management-page .user-filter-row input,
+.user-management-page .user-filter-row select {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid #dce6e5;
+  border-radius: 9px;
+  background: #fff;
+  color: #40565d;
+  font-size: 11px;
+  outline: none;
+}
+
+.user-management-page .user-filter-row input:focus,
+.user-management-page .user-filter-row select:focus {
+  border-color: #60a79b;
+  box-shadow: 0 0 0 3px #dff1e9;
+}
+
+.user-management-page .user-table td {
+  vertical-align: middle;
+}
+
+.user-management-page .user-table .user-name {
+  font-weight: 800;
+  color: #29464d;
+}
+
+.user-management-page .user-table .user-username {
+  color: #87979a;
+  font-size: 9px;
+}
+
+.user-management-page .user-table .user-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.user-management-page .user-table .secondary-button {
+  padding: 8px 11px;
+  font-size: 10px;
+}
+
+.user-management-page .user-table .plain-button {
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.user-management-page .user-empty-state {
+  padding: 42px 20px;
+  text-align: center;
+  color: #87979a;
+  font-size: 12px;
+}
+
+.profile-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  padding: 24px;
+  background: #102b32a8;
+}
+.profile-modal,
+.password-reset-modal {
+  width: min(100%, 760px);
+  max-height: min(88vh, 900px);
+  overflow-y: auto;
+  margin: auto;
+}
+.password-reset-modal { width: min(100%, 620px); }
+.profile-modal .panel-header,
+.password-reset-modal .panel-header { margin-bottom: 0; }
+.admin-profile-details {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  align-items: start;
+  gap: 22px;
+  padding: 22px;
+}
+.admin-profile-image {
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 4px solid #e5f3ec;
+}
+.admin-profile-fallback {
+  display: grid;
+  place-items: center;
+  background: #dff1e9;
+  color: #176b67;
+  font: 800 30px Manrope, sans-serif;
+}
+.admin-profile-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+}
+.admin-profile-fields > div { min-width: 0; }
+.admin-profile-fields small,
+.admin-profile-fields strong { display: block; }
+.admin-profile-fields small { margin-bottom: 5px; color: #829296; font-size: 10px; text-transform: capitalize; }
+.admin-profile-fields strong { color: #34525a; font-size: 12px; overflow-wrap: anywhere; }
+.admin-profile-responsibilities { grid-column: 1 / -1; }
+.admin-profile-responsibilities strong { margin-top: 7px; }
+.admin-password-form { padding: 22px; }
+@media (max-width: 600px) {
+  .profile-modal-backdrop { padding: 10px; }
+  .admin-profile-details { grid-template-columns: 1fr; }
+  .admin-profile-fields { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 850px) {
+  .user-management-page .user-filter-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .user-management-page .user-filter-row input {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 600px) {
+  .user-management-page .user-management-heading {
+    align-items: flex-start;
+  }
+
+  .user-management-page .user-management-heading .primary-button {
+    width: 100%;
+  }
+
+  .user-management-page .user-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .user-management-page .user-filter-row {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+
+  .user-management-page .user-filter-row input {
+    grid-column: auto;
+  }
+
+  .user-management-page .user-management-form .form-grid {
+    grid-template-columns: 1fr;
+    padding: 17px;
+  }
+
+  .user-management-page .user-form-actions {
+    padding: 0 17px;
+    flex-wrap: wrap;
+  }
+
+  .user-management-page .user-table .user-actions {
+    flex-wrap: wrap;
+  }
+}
